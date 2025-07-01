@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Izometryczna Gra RTS - Voxel World</title>
+    <title>Izometryczna Gra RTS - Pustynna Planeta</title>
     <style>
       body {
         margin: 0;
@@ -39,7 +39,7 @@
         background: rgba(0, 0, 0, 0.5);
         padding: 10px;
         border-radius: 8px;
-        border: 1px solid #444;
+        border: 1px solid #7c5a3a;
       }
       #health-bar-container {
         display: flex;
@@ -76,7 +76,7 @@
         position: absolute;
         bottom: 10px;
         right: 10px;
-        border: 2px solid #666;
+        border: 2px solid #7c5a3a;
         background: rgba(0, 0, 0, 0.7);
         padding: 5px;
       }
@@ -89,7 +89,7 @@
         bottom: 10px;
         left: 10px;
         background: rgba(0, 0, 0, 0.7);
-        border: 1px solid #555;
+        border: 1px solid #7c5a3a;
         border-radius: 8px;
         padding: 10px;
         display: none; /* Ukryte domyślnie */
@@ -99,23 +99,23 @@
         gap: 5px;
       }
       .menu-button {
-        background: #444;
-        color: white;
-        border: 1px solid #777;
+        background: #4a3c2a;
+        color: #f0e0c0;
+        border: 1px solid #7c5a3a;
         padding: 8px 12px;
         cursor: pointer;
-        width: 200px;
+        width: 220px;
         text-align: left;
         border-radius: 4px;
       }
       .menu-button:hover {
-        background: #5a5a5a;
+        background: #6a5c4a;
       }
       .menu-button.disabled {
-        background: #333;
+        background: #33281a;
         color: #888;
         cursor: not-allowed;
-        border-color: #555;
+        border-color: #554433;
       }
 
       #action-info {
@@ -123,10 +123,12 @@
         bottom: 20px;
         left: 50%;
         transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(10, 5, 0, 0.8);
         padding: 10px 20px;
         border-radius: 20px;
         font-size: 16px;
+        border: 1px solid #7c5a3a;
+        color: #ffaf4d;
         display: none;
       }
     </style>
@@ -145,7 +147,7 @@
         <div id="resource-display">
           <div class="resource">🌲 <span id="wood-amount">0</span></div>
           <div class="resource">⛏️ <span id="stone-amount">0</span></div>
-          <div class="resource">💰 <span id="gold-amount">0</span></div>
+          <div class="resource">💰 <span id="spice-amount">0</span></div>
         </div>
       </div>
 
@@ -160,17 +162,11 @@
         <button class="menu-button" data-building="barracks">
           Koszary (100🌲 50⛏️)
         </button>
-        <button class="menu-button" data-building="goldmine">
-          Kopalnia Złota (80🌲 120⛏️)
+        <button class="menu-button" data-building="factory">
+          Fabryka (120🌲 150⛏️)
         </button>
-        <button class="menu-button" data-building="church">
-          Kościół (50🌲 50⛏️ 50💰)
-        </button>
-        <button class="menu-button" data-building="blacksmith">
-          Kuźnia (75⛏️ 50💰)
-        </button>
-        <button class="menu-button" data-building="siegeworkshop">
-          Warsztat Oblęż. (150🌲 100💰)
+        <button class="menu-button" data-building="spice_silo">
+          Silos Melanżu (80🌲 120⛏️)
         </button>
       </div>
 
@@ -181,11 +177,15 @@
         <button class="menu-button" data-unit="shieldbearer">
           Tarczownik (30🌲 15💰)
         </button>
-        <button class="menu-button" data-unit="spearman">
-          Włócznik (25🌲 15💰)
-        </button>
         <button class="menu-button" data-unit="crossbowman">
           Kusznik (15🌲 25💰)
+        </button>
+      </div>
+
+      <div id="factory-menu" class="menu-panel">
+        <button class="menu-button" data-unit="tank">Czołg (50⛏️ 80💰)</button>
+        <button class="menu-button" data-unit="harrier">
+          Statek Powietrzny (40🌲 100💰)
         </button>
       </div>
 
@@ -204,14 +204,91 @@
       import * as THREE from "three";
 
       // ====================================================================
+      // SIMPLEX NOISE - do generowania terenu
+      // ====================================================================
+      const F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
+      const G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+      const F3 = 1.0 / 3.0;
+      const G3 = 1.0 / 6.0;
+      const grad3 = new Float32Array([
+        1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1, 0, 1, 0, 1, -1, 0, 1, 1, 0, -1, -1,
+        0, -1, 0, 1, 1, 0, -1, 1, 0, 1, -1, 0, -1, -1,
+      ]);
+      const p = new Uint8Array(256);
+      for (let i = 0; i < 256; i++) p[i] = i;
+      let n;
+      let q;
+      for (let i = 255; i > 0; i--) {
+        n = Math.floor((i + 1) * Math.random());
+        q = p[i];
+        p[i] = p[n];
+        p[n] = q;
+      }
+      const perm = new Uint8Array(512);
+      const permMod12 = new Uint8Array(512);
+      for (let i = 0; i < 512; i++) {
+        perm[i] = p[i & 255];
+        permMod12[i] = perm[i] % 12;
+      }
+      function simplex2D(xin, yin) {
+        let n0, n1, n2;
+        const s = (xin + yin) * F2;
+        const i = Math.floor(xin + s);
+        const j = Math.floor(yin + s);
+        const t = (i + j) * G2;
+        const X0 = i - t;
+        const Y0 = j - t;
+        const x0 = xin - X0;
+        const y0 = yin - Y0;
+        let i1, j1;
+        if (x0 > y0) {
+          i1 = 1;
+          j1 = 0;
+        } else {
+          i1 = 0;
+          j1 = 1;
+        }
+        const x1 = x0 - i1 + G2;
+        const y1 = y0 - j1 + G2;
+        const x2 = x0 - 1.0 + 2.0 * G2;
+        const y2 = y0 - 1.0 + 2.0 * G2;
+        const ii = i & 255;
+        const jj = j & 255;
+        const gi0 = permMod12[ii + perm[jj]] * 3;
+        const gi1 = permMod12[ii + i1 + perm[jj + j1]] * 3;
+        const gi2 = permMod12[ii + 1 + perm[jj + 1]] * 3;
+        let t0 = 0.5 - x0 * x0 - y0 * y0;
+        if (t0 < 0) n0 = 0.0;
+        else {
+          t0 *= t0;
+          n0 = t0 * t0 * (grad3[gi0] * x0 + grad3[gi0 + 1] * y0);
+        }
+        let t1 = 0.5 - x1 * x1 - y1 * y1;
+        if (t1 < 0) n1 = 0.0;
+        else {
+          t1 *= t1;
+          n1 = t1 * t1 * (grad3[gi1] * x1 + grad3[gi1 + 1] * y1);
+        }
+        let t2 = 0.5 - x2 * x2 - y2 * y2;
+        if (t2 < 0) n2 = 0.0;
+        else {
+          t2 *= t2;
+          n2 = t2 * t2 * (grad3[gi2] * x2 + grad3[gi2 + 1] * y2);
+        }
+        return 70.0 * (n0 + n1 + n2);
+      }
+
+      // ====================================================================
       // KONFIGURACJA I STAŁE
       // ====================================================================
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x87ceeb);
+      scene.background = new THREE.Color(0xd2b48c); // Pustynne niebo
+      scene.fog = new THREE.Fog(0xd2b48c, 50, 120);
 
       const TILE_SIZE = 2;
       const MAP_WIDTH = 50;
       const MAP_HEIGHT = 50;
+      const TERRAIN_HEIGHT_SCALE = 5;
 
       const camera = new THREE.PerspectiveCamera(
         45,
@@ -227,10 +304,10 @@
         .getElementById("game-container")
         .appendChild(renderer.domElement);
 
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
       scene.add(ambientLight);
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
-      directionalLight.position.set(-30, 50, 20);
+      const directionalLight = new THREE.DirectionalLight(0xffecd6, 1.2);
+      directionalLight.position.set(-40, 60, 30);
       directionalLight.castShadow = true;
       directionalLight.shadow.mapSize.width = 2048;
       directionalLight.shadow.mapSize.height = 2048;
@@ -246,32 +323,43 @@
           damage: 12,
           speed: 3.5,
           range: 1.5,
-          cost: { wood: 20, stone: 0, gold: 10 },
-          color: 0x0000ff,
+          cost: { wood: 20, stone: 0, spice: 10 },
+          color: 0x0044ff,
+          isFlying: false,
         },
         shieldbearer: {
           hp: 150,
           damage: 8,
           speed: 3.0,
           range: 1.5,
-          cost: { wood: 30, stone: 0, gold: 15 },
+          cost: { wood: 30, stone: 0, spice: 15 },
           color: 0x4444ff,
-        },
-        spearman: {
-          hp: 90,
-          damage: 15,
-          speed: 4.0,
-          range: 2.5,
-          cost: { wood: 25, stone: 0, gold: 15 },
-          color: 0x00ff00,
+          isFlying: false,
         },
         crossbowman: {
           hp: 70,
           damage: 10,
           speed: 3.8,
           range: 8.0,
-          cost: { wood: 15, stone: 0, gold: 25 },
-          color: 0xffff00,
+          cost: { wood: 15, stone: 0, spice: 25 },
+          color: 0x00aaff,
+          isFlying: false,
+        },
+        tank: {
+          hp: 300,
+          damage: 25,
+          speed: 2.8,
+          range: 6.0,
+          cost: { wood: 0, stone: 50, spice: 80 },
+          isFlying: false,
+        },
+        harrier: {
+          hp: 120,
+          damage: 18,
+          speed: 5.5,
+          range: 7.0,
+          cost: { wood: 40, stone: 0, spice: 100 },
+          isFlying: true,
         },
       };
       const ENEMY_UNIT_STATS = {
@@ -281,6 +369,7 @@
           speed: 3.5,
           range: 1.5,
           color: 0xff0000,
+          isFlying: false,
         },
         shieldbearer: {
           hp: 160,
@@ -288,25 +377,20 @@
           speed: 3.0,
           range: 1.5,
           color: 0xff4444,
+          isFlying: false,
         },
-        spearman: {
-          hp: 95,
-          damage: 13,
-          speed: 4.0,
-          range: 2.5,
-          color: 0xff8c00,
-        }, // Poprawiony kolor (był błąd)
         crossbowman: {
           hp: 75,
           damage: 9,
           speed: 3.8,
           range: 8.0,
           color: 0xffaa00,
+          isFlying: false,
         },
       };
 
       const gameState = {
-        resources: { wood: 200, stone: 150, gold: 50 },
+        resources: { wood: 1000, stone: 1000, spice: 800 }, // Zwiększone zasoby startowe
         player: {
           health: 100,
           maxHealth: 100,
@@ -328,81 +412,30 @@
       const grid = Array(MAP_WIDTH)
         .fill(null)
         .map(() => Array(MAP_HEIGHT).fill(0));
+      const heightMap = Array(MAP_WIDTH)
+        .fill(null)
+        .map(() => Array(MAP_HEIGHT).fill(0));
+      const vibrationMap = Array(MAP_WIDTH)
+        .fill(null)
+        .map(() => Array(MAP_HEIGHT).fill(0));
 
       const woodAmountEl = document.getElementById("wood-amount");
       const stoneAmountEl = document.getElementById("stone-amount");
-      const goldAmountEl = document.getElementById("gold-amount");
+      const spiceAmountEl = document.getElementById("spice-amount");
       const healthBarFillEl = document.getElementById("health-bar-fill");
       const buildMenuEl = document.getElementById("build-menu");
       const trainMenuEl = document.getElementById("train-menu");
+      const factoryMenuEl = document.getElementById("factory-menu");
       const actionInfoEl = document.getElementById("action-info");
 
-      // 0: trawa, 1: woda, 2: kamień, 3: drzewo, 4: baza wroga, 5: złoto, 6: wioska startowa, 7: cytadela wroga
-      const MAP_GRID = [
-        [
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 7,
-          7, 7, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1,
-        ],
-        [
-          1, 4, 4, 4, 1, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
-          0, 7, 1, 5, 5, 5, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1,
-        ],
-        [
-          1, 4, 0, 4, 1, 3, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
-          7, 7, 1, 5, 0, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1,
-        ],
-        [
-          1, 4, 4, 4, 1, 3, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 5, 5, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1,
-        ],
-        [
-          1, 1, 1, 1, 1, 3, 0, 0, 0, 0, 0, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-      ];
-
-      // --- POPRAWIONA SEKCJA GENEROWANIA MAPY ---
-      while (MAP_GRID.length < MAP_HEIGHT) {
-        const row = Array(MAP_WIDTH).fill(0);
-        row[0] = 1;
-        row[MAP_WIDTH - 1] = 1;
-        // Pętla po kolumnach (zmienna `i` jest teraz w poprawnym zasięgu)
-        for (let i = 1; i < MAP_WIDTH - 1; i++) {
-          // Sprawdź, czy to miejsce na wioskę startową gracza
-          if (MAP_GRID.length > MAP_HEIGHT - 10 && i > 5 && i < 15) {
-            row[i] = 6;
-          } else {
-            // W przeciwnym wypadku, generuj losowy teren
-            if (Math.random() < 0.15) row[i] = 3; // Drzewo
-            else if (Math.random() < 0.05) row[i] = 2; // Skała
-          }
-        }
-        MAP_GRID.push(row);
-      }
-      MAP_GRID[MAP_HEIGHT - 1] = Array(MAP_WIDTH).fill(1);
+      // 0: piasek, 1: skały (nieprzechodnie), 2: złoże kamieni, 3: złoże biomasy (drzewa), 4: baza wroga, 5: złoże melanżu, 6: wioska startowa, 7: cytadela wroga
+      const MAP_GRID = [];
 
       const buildingCosts = {
-        townhall: { wood: 150, stone: 100, gold: 0 },
-        barracks: { wood: 100, stone: 50, gold: 0 },
-        goldmine: { wood: 80, stone: 120, gold: 0 },
-        church: { wood: 50, stone: 50, gold: 50 },
-        blacksmith: { wood: 0, stone: 75, gold: 50 },
-        siegeworkshop: { wood: 150, stone: 0, gold: 100 },
+        townhall: { wood: 150, stone: 100, spice: 0 },
+        barracks: { wood: 100, stone: 50, spice: 0 },
+        factory: { wood: 120, stone: 150, spice: 0 },
+        spice_silo: { wood: 80, stone: 120, spice: 0 },
       };
       const buildingData = {
         townhall: {
@@ -419,30 +452,29 @@
           color: 0x8b4513,
           size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 2, TILE_SIZE),
         },
-        goldmine: {
-          name: "Kopalnia Złota",
+        factory: {
+          name: "Fabryka",
+          color: 0x606070,
+          size: new THREE.Vector3(
+            TILE_SIZE * 1.8,
+            TILE_SIZE * 1.5,
+            TILE_SIZE * 1.2
+          ),
+        },
+        spice_silo: {
+          name: "Silos Melanżu",
           color: 0xffd700,
           size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 1.5, TILE_SIZE),
         },
-        church: {
-          name: "Kościół",
-          color: 0xffffff,
-          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 2.2, TILE_SIZE),
-        },
-        blacksmith: {
-          name: "Kuźnia",
-          color: 0x404040,
-          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 1.8, TILE_SIZE),
-        },
-        siegeworkshop: {
-          name: "Warsztat Oblężniczy",
-          color: 0x654321,
-          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 1.8, TILE_SIZE),
-        },
       };
 
+      function getHeight(x, z) {
+        if (x < 0 || x >= MAP_WIDTH || z < 0 || z >= MAP_HEIGHT) return 0;
+        return heightMap[Math.floor(x)][Math.floor(z)];
+      }
+
       function gridToWorld(x, z) {
-        return new THREE.Vector3(x * TILE_SIZE, 0, z * TILE_SIZE);
+        return new THREE.Vector3(x * TILE_SIZE, getHeight(x, z), z * TILE_SIZE);
       }
       function worldToGrid(position) {
         return {
@@ -450,31 +482,38 @@
           z: Math.round(position.z / TILE_SIZE),
         };
       }
-      function showActionInfo(text) {
+      function showActionInfo(text, duration = 2000) {
         actionInfoEl.textContent = text;
         actionInfoEl.style.display = "block";
         setTimeout(() => {
           actionInfoEl.style.display = "none";
-        }, 2000);
+        }, duration);
       }
 
+      // --- KLASY ---
       class Unit {
         constructor(stats, position, isEnemy = false) {
           this.stats = stats;
           this.health = stats.hp;
           this.isEnemy = isEnemy;
-          this.state = "MOVING_TO_GOAL";
+          this.state = "IDLE";
           this.path = [];
           this.target = null;
           this.lastAttackTime = 0;
           this.sightRange = 12 * TILE_SIZE;
 
-          this.mesh = new THREE.Mesh(
-            new THREE.BoxGeometry(1, 1.5, 1),
-            new THREE.MeshLambertMaterial({ color: stats.color })
-          );
+          if (stats.isFlying) {
+            this.mesh = createHarrierMesh(stats.color);
+          } else if (stats.hp > 200) {
+            // Tank
+            this.mesh = createTankMesh(stats.color);
+          } else {
+            // Infantry
+            this.mesh = createHumanoidMesh(stats.color);
+          }
+
           this.mesh.position.copy(position);
-          this.mesh.position.y = 0.75;
+          this.mesh.position.y += this.stats.isFlying ? 10 : 0.75; // Wysokość dla jednostek latających
           this.mesh.castShadow = true;
           this.mesh.userData = {
             type: isEnemy ? "enemyUnit" : "playerUnit",
@@ -504,7 +543,7 @@
             });
             this.selectionCircle = new THREE.Mesh(ringGeo, ringMat);
             this.selectionCircle.rotation.x = -Math.PI / 2;
-            this.selectionCircle.position.y = -0.7;
+            this.selectionCircle.position.y = stats.isFlying ? -10 : -0.7; // Pod jednostką
             this.selectionCircle.visible = false;
             this.mesh.add(this.selectionCircle);
           }
@@ -513,18 +552,23 @@
         update(delta, clock, potentialTargets, goal) {
           this.healthBarContainer.lookAt(camera.position);
 
-          if (this.state !== "ATTACKING") {
-            this.findTarget(potentialTargets);
+          // Animacja ramion dla piechoty
+          if (this.mesh.userData.arms && this.path.length > 0) {
+            const animSpeed = 10;
+            this.mesh.userData.arms.left.rotation.x =
+              Math.sin(clock.getElapsedTime() * animSpeed) * 0.8;
+            this.mesh.userData.arms.right.rotation.x =
+              -Math.sin(clock.getElapsedTime() * animSpeed) * 0.8;
           }
 
+          if (this.state !== "ATTACKING") this.findTarget(potentialTargets);
           if (
             this.target &&
             (this.target.health <= 0 || !this.target.mesh.parent)
           ) {
             this.target = null;
-            this.state = "MOVING_TO_GOAL";
+            this.state = "IDLE";
           }
-
           if (this.target) {
             const distanceToTarget = this.mesh.position.distanceTo(
               this.target.mesh.position
@@ -535,28 +579,26 @@
             } else {
               this.state = "ENGAGING";
             }
+          } else if (this.path.length > 0) {
+            this.state = "MOVING";
           } else {
-            this.state = "MOVING_TO_GOAL";
+            this.state = "IDLE";
           }
 
           switch (this.state) {
-            case "MOVING_TO_GOAL":
-              if (this.path.length === 0 && goal) {
-                this.path = findPath(
-                  worldToGrid(this.mesh.position),
-                  worldToGrid(goal.position)
-                );
-              }
-              break;
             case "ENGAGING":
               if (
                 this.target &&
                 (this.path.length === 0 || Math.random() < 0.05)
               ) {
-                this.path = findPath(
-                  worldToGrid(this.mesh.position),
-                  worldToGrid(this.target.mesh.position)
-                );
+                if (this.stats.isFlying) {
+                  this.path = [worldToGrid(this.target.mesh.position)];
+                } else {
+                  this.path = findPath(
+                    worldToGrid(this.mesh.position),
+                    worldToGrid(this.target.mesh.position)
+                  );
+                }
               }
               break;
             case "ATTACKING":
@@ -570,8 +612,13 @@
               }
               break;
           }
-
           this.moveAlongPath(delta);
+
+          // Dodawanie wibracji dla jednostek naziemnych
+          if (!this.stats.isFlying && this.path.length > 0) {
+            const gridPos = worldToGrid(this.mesh.position);
+            sandWormManager.addVibration(gridPos.x, gridPos.z, 0.5 * delta);
+          }
         }
 
         findTarget(potentialTargets) {
@@ -586,25 +633,39 @@
               }
             }
           });
-          if (closestTarget) {
-            this.target = closestTarget;
-          }
+          if (closestTarget) this.target = closestTarget;
         }
 
         moveAlongPath(delta) {
-          if (this.path && this.path.length > 0) {
-            const targetNode = this.path[0];
-            const targetPos = gridToWorld(targetNode.x, targetNode.z);
-            targetPos.y = this.mesh.position.y;
-            const direction = targetPos
-              .clone()
-              .sub(this.mesh.position)
-              .normalize();
-            const speed = this.stats.speed * delta;
-            this.mesh.position.add(direction.multiplyScalar(speed));
-            if (this.mesh.position.distanceTo(targetPos) < 0.5) {
-              this.path.shift();
-            }
+          if (!this.path || this.path.length === 0) return;
+
+          const targetNode = this.path[0];
+          const targetPos = this.stats.isFlying
+            ? new THREE.Vector3(
+                targetNode.x * TILE_SIZE,
+                this.mesh.position.y,
+                targetNode.z * TILE_SIZE
+              )
+            : gridToWorld(targetNode.x, targetNode.z);
+
+          targetPos.y += this.stats.isFlying ? 0 : 0.75; // Uniesienie dla jednostek naziemnych
+
+          const direction = targetPos
+            .clone()
+            .sub(this.mesh.position)
+            .normalize();
+          const speed = this.stats.speed * delta;
+          this.mesh.position.add(direction.multiplyScalar(speed));
+
+          if (!this.stats.isFlying) {
+            // Płynne dopasowanie do terenu
+            const currentGrid = worldToGrid(this.mesh.position);
+            this.mesh.position.y =
+              getHeight(currentGrid.x, currentGrid.z) + 0.75;
+          }
+
+          if (this.mesh.position.distanceTo(targetPos) < 0.5) {
+            this.path.shift();
           }
         }
 
@@ -616,7 +677,6 @@
           }
           this.healthBar.scale.x = this.health / this.stats.hp;
         }
-
         die() {
           scene.remove(this.mesh);
           const list = this.isEnemy
@@ -625,134 +685,222 @@
           const index = list.indexOf(this);
           if (index > -1) list.splice(index, 1);
         }
-
         setSelection(selected) {
           if (this.selectionCircle) this.selectionCircle.visible = selected;
         }
       }
 
-      class PlayerUnit extends Unit {
-        constructor(stats, position) {
-          super(stats, position, false);
+      // Menedżer Czerwi Pustyni
+      const sandWormManager = {
+        vibrationThreshold: 15,
+        worms: [],
+        update(delta, clock) {
+          for (let x = 0; x < MAP_WIDTH; x++) {
+            for (let z = 0; z < MAP_HEIGHT; z++) {
+              // Wibracje powoli zanikają
+              if (vibrationMap[x][z] > 0) {
+                vibrationMap[x][z] -= delta * 0.1;
+              }
+              // Sprawdzenie progu
+              if (vibrationMap[x][z] > this.vibrationThreshold) {
+                this.spawnWorm(x, z);
+                vibrationMap[x][z] = 0; // Reset po spawnie
+              }
+            }
+          }
+          this.worms.forEach((worm) => worm.update(delta, clock));
+          this.worms = this.worms.filter((worm) => worm.isAlive);
+        },
+        addVibration(x, z, amount) {
+          if (x < 0 || x >= MAP_WIDTH || z < 0 || z >= MAP_HEIGHT) return;
+          if (MAP_GRID[z][x] === 0) {
+            // Tylko na piasku
+            vibrationMap[x][z] += amount;
+          }
+        },
+        spawnWorm(x, z) {
+          const pos = gridToWorld(x, z);
+          const worm = new SandWorm(pos);
+          this.worms.push(worm);
+          showActionInfo("UWAGA! WYKRYTO WIBRACJE!", 4000);
+        },
+      };
+
+      class SandWorm {
+        constructor(position) {
+          this.position = position;
+          this.isAlive = true;
+          this.state = "EMERGING"; // EMERGING, ATTACKING, SUBMERGING
+          this.lifetime = 10; // Czas życia czerwa w sekundach
+          this.attackCooldown = 2;
+          this.lastAttackTime = 0;
+
+          const segments = 10;
+          this.body = new THREE.Group();
+          const segmentGeo = new THREE.CylinderGeometry(2, 2, 2, 8);
+          const segmentMat = new THREE.MeshLambertMaterial({ color: 0x654321 });
+          for (let i = 0; i < segments; i++) {
+            const segment = new THREE.Mesh(segmentGeo, segmentMat);
+            segment.rotation.x = Math.PI / 2;
+            segment.position.z = i * -2;
+            this.body.add(segment);
+          }
+          this.body.position.copy(position);
+          this.body.position.y -= segments * 2; // Start pod ziemią
+          scene.add(this.body);
         }
-      }
-      class EnemyUnit extends Unit {
-        constructor(stats, position) {
-          super(stats, position, true);
+
+        update(delta, clock) {
+          this.lifetime -= delta;
+          if (this.lifetime <= 0 && this.state !== "SUBMERGING") {
+            this.state = "SUBMERGING";
+          }
+
+          switch (this.state) {
+            case "EMERGING":
+              this.body.position.y += 15 * delta;
+              if (this.body.position.y >= this.position.y - 5) {
+                this.body.position.y = this.position.y - 5;
+                this.state = "ATTACKING";
+              }
+              break;
+            case "ATTACKING":
+              const targets = [
+                ...gameState.playerUnits,
+                ...gameState.enemyUnits,
+                gameState.player,
+              ];
+              let closestTarget = null;
+              let minDistance = 20; // Zasięg ataku czerwa
+              targets.forEach((t) => {
+                if (t && t.health > 0) {
+                  const dist = this.body.position.distanceTo(t.mesh.position);
+                  if (dist < minDistance) {
+                    minDistance = dist;
+                    closestTarget = t;
+                  }
+                }
+              });
+
+              if (
+                closestTarget &&
+                clock.getElapsedTime() - this.lastAttackTime >
+                  this.attackCooldown
+              ) {
+                showActionInfo("Czerw pożera jednostkę!", 1500);
+                closestTarget.takeDamage(500); // Ogromne obrażenia
+                this.lastAttackTime = clock.getElapsedTime();
+              }
+              break;
+            case "SUBMERGING":
+              this.body.position.y -= 15 * delta;
+              if (this.body.position.y < this.position.y - 20) {
+                this.die();
+              }
+              break;
+          }
+        }
+
+        die() {
+          this.isAlive = false;
+          scene.remove(this.body);
         }
       }
 
+      // --- GENEROWANIE ŚWIATA ---
       function generateWorld() {
         const materials = {
-          grass: new THREE.MeshLambertMaterial({ color: 0x6ab04c }),
-          water: new THREE.MeshLambertMaterial({
-            color: 0x48dbfb,
-            transparent: true,
-            opacity: 0.7,
+          sand: new THREE.MeshLambertMaterial({ color: 0xc2b280 }),
+          rock: new THREE.MeshLambertMaterial({ color: 0x7f7053 }),
+          biomass: new THREE.MeshLambertMaterial({ color: 0x556b2f }),
+          spice: new THREE.MeshLambertMaterial({
+            color: 0xe89f39,
+            emissive: 0x774411,
           }),
-          rock: new THREE.MeshLambertMaterial({ color: 0x7f8c8d }),
-          treeTrunk: new THREE.MeshLambertMaterial({ color: 0x8d6e63 }),
-          treeLeaves: new THREE.MeshLambertMaterial({ color: 0x27ae60 }),
           enemyBase: new THREE.MeshLambertMaterial({ color: 0xc0392b }),
-          gold: new THREE.MeshLambertMaterial({ color: 0xf1c40f }),
           startVillage: new THREE.MeshLambertMaterial({ color: 0xbdc3c7 }),
           enemyCitadel: new THREE.MeshLambertMaterial({ color: 0x330033 }),
         };
 
-        const groundGeometry = new THREE.BoxGeometry(
-          TILE_SIZE,
-          TILE_SIZE,
-          TILE_SIZE
-        );
+        // Krok 1: Generowanie mapy wysokości i podstawowej siatki mapy
+        const noiseScale = 0.1;
+        for (let z = 0; z < MAP_HEIGHT; z++) {
+          MAP_GRID[z] = [];
+          for (let x = 0; x < MAP_WIDTH; x++) {
+            const nx = x * noiseScale,
+              nz = z * noiseScale;
+            const e =
+              1 * simplex2D(nx, nz) +
+              0.5 * simplex2D(2 * nx, 2 * nz) +
+              0.25 * simplex2D(4 * nx, 4 * nz);
+            heightMap[x][z] = Math.pow(e, 2) * TERRAIN_HEIGHT_SCALE;
+            MAP_GRID[z][x] = 0; // Domyślnie piasek
+          }
+        }
 
+        // Krok 2: Ustawianie granic i specjalnych obszarów (bazy, złoża)
         for (let z = 0; z < MAP_HEIGHT; z++) {
           for (let x = 0; x < MAP_WIDTH; x++) {
-            const tileType = MAP_GRID[z][x];
-            const pos = gridToWorld(x, z);
-            pos.y -= TILE_SIZE / 2;
+            if (x == 0 || z == 0 || x == MAP_WIDTH - 1 || z == MAP_HEIGHT - 1)
+              MAP_GRID[z][x] = 1; // Granica skalna
+            if (x > 22 && x < 26 && z > 1 && z < 5) MAP_GRID[z][x] = 7; // Cytadela wroga
+            if (x > 5 && x < 15 && z > MAP_HEIGHT - 10) MAP_GRID[z][x] = 6; // Wioska startowa
+            if (Math.random() < 0.04 && MAP_GRID[z][x] == 0) MAP_GRID[z][x] = 2; // kamień
+            if (Math.random() < 0.03 && MAP_GRID[z][x] == 0) MAP_GRID[z][x] = 3; // biomasa
+            if (Math.random() < 0.02 && MAP_GRID[z][x] == 0) MAP_GRID[z][x] = 5; // melanż
+          }
+        }
+
+        // Krok 3: Tworzenie geometrii
+        const tileGeo = new THREE.BoxGeometry(
+          TILE_SIZE,
+          TILE_SIZE * 4,
+          TILE_SIZE
+        );
+        for (let z = 0; z < MAP_HEIGHT; z++) {
+          for (let x = 0; x < MAP_WIDTH; x++) {
+            const y = getHeight(x, z);
+            const pos = new THREE.Vector3(
+              x * TILE_SIZE,
+              y - TILE_SIZE * 2,
+              z * TILE_SIZE
+            );
             let groundTile;
+            const tileType = MAP_GRID[z][x];
 
             switch (tileType) {
               case 1:
-                groundTile = new THREE.Mesh(groundGeometry, materials.water);
-                pos.y -= TILE_SIZE / 2;
+                groundTile = new THREE.Mesh(tileGeo, materials.rock);
                 grid[x][z] = 1;
                 break;
               case 2:
-              case 5:
-                groundTile = new THREE.Mesh(groundGeometry, materials.grass);
-                scene.add(groundTile);
-                groundTile.position.copy(pos);
-                const resourceGeo = new THREE.BoxGeometry(
-                  TILE_SIZE * 0.8,
-                  TILE_SIZE * 1.5,
-                  TILE_SIZE * 0.8
-                );
-                const resourceMesh = new THREE.Mesh(
-                  resourceGeo,
-                  tileType === 2 ? materials.rock : materials.gold
-                );
-                resourceMesh.position.set(pos.x, TILE_SIZE / 2, pos.z);
-                resourceMesh.castShadow = true;
-                resourceMesh.userData = {
-                  type: tileType === 2 ? "stone" : "gold",
-                  gridX: x,
-                  gridZ: z,
-                };
-                scene.add(resourceMesh);
-                worldObjects[`${x},${z}`] = resourceMesh;
+                groundTile = new THREE.Mesh(tileGeo, materials.sand);
+                createResource(pos, materials.rock, "stone", x, z);
                 grid[x][z] = 1;
-                continue;
+                break;
               case 3:
-                groundTile = new THREE.Mesh(groundGeometry, materials.grass);
-                scene.add(groundTile);
-                groundTile.position.copy(pos);
-                const trunk = new THREE.Mesh(
-                  new THREE.CylinderGeometry(0.3, 0.4, TILE_SIZE * 1.5, 8),
-                  materials.treeTrunk
-                );
-                trunk.position.set(pos.x, TILE_SIZE * 0.75, pos.z);
-                const leaves = new THREE.Mesh(
-                  new THREE.DodecahedronGeometry(TILE_SIZE * 0.8),
-                  materials.treeLeaves
-                );
-                leaves.position.set(pos.x, TILE_SIZE * 2, pos.z);
-                trunk.castShadow = true;
-                leaves.castShadow = true;
-                const tree = new THREE.Group();
-                tree.add(trunk);
-                tree.add(leaves);
-                tree.userData = { type: "wood", gridX: x, gridZ: z };
-                scene.add(tree);
-                worldObjects[`${x},${z}`] = tree;
+                groundTile = new THREE.Mesh(tileGeo, materials.sand);
+                createResource(pos, materials.biomass, "wood", x, z);
                 grid[x][z] = 1;
-                continue;
-              case 4:
-                groundTile = new THREE.Mesh(
-                  groundGeometry,
-                  materials.enemyBase
-                );
+                break;
+              case 5:
+                groundTile = new THREE.Mesh(tileGeo, materials.sand);
+                createResource(pos, materials.spice, "spice", x, z);
+                grid[x][z] = 1;
+                break;
+              case 7:
+                groundTile = new THREE.Mesh(tileGeo, materials.enemyCitadel);
                 grid[x][z] = 1;
                 break;
               case 6:
-                groundTile = new THREE.Mesh(
-                  groundGeometry,
-                  materials.startVillage
-                );
-                break;
-              case 7:
-                groundTile = new THREE.Mesh(
-                  groundGeometry,
-                  materials.enemyCitadel
-                );
-                grid[x][z] = 1;
+                groundTile = new THREE.Mesh(tileGeo, materials.startVillage);
                 break;
               default:
-                groundTile = new THREE.Mesh(groundGeometry, materials.grass);
+                groundTile = new THREE.Mesh(tileGeo, materials.sand);
                 break;
             }
-
             groundTile.position.copy(pos);
+            groundTile.scale.y = (y + TILE_SIZE * 2) / (TILE_SIZE * 4); // Skalowanie wysokości
             groundTile.receiveShadow = true;
             scene.add(groundTile);
           }
@@ -763,10 +911,12 @@
           TILE_SIZE * 4,
           TILE_SIZE * 3
         );
-        const citadelMat = new THREE.MeshLambertMaterial({ color: 0x550055 });
-        gameState.enemyBase = new THREE.Mesh(citadelGeo, citadelMat);
-        gameState.enemyBase.position.copy(gridToWorld(23, 2));
-        gameState.enemyBase.position.y = TILE_SIZE * 2;
+        gameState.enemyBase = new THREE.Mesh(
+          citadelGeo,
+          new THREE.MeshLambertMaterial({ color: 0x550055 })
+        );
+        gameState.enemyBase.position.copy(gridToWorld(24, 3));
+        gameState.enemyBase.position.y += TILE_SIZE * 2;
         gameState.enemyBase.castShadow = true;
         gameState.enemyBase.userData = {
           type: "enemy_base",
@@ -785,7 +935,79 @@
         scene.add(gameState.enemyBase);
       }
 
+      function createResource(pos, material, type, x, z) {
+        const resourceGeo = new THREE.DodecahedronGeometry(TILE_SIZE * 0.8);
+        const resourceMesh = new THREE.Mesh(resourceGeo, material);
+        resourceMesh.position.set(pos.x, pos.y + TILE_SIZE * 2 + 1, pos.z);
+        resourceMesh.castShadow = true;
+        resourceMesh.userData = { type: type, gridX: x, gridZ: z };
+        scene.add(resourceMesh);
+        worldObjects[`${x},${z}`] = resourceMesh;
+      }
+
+      function createHumanoidMesh(color) {
+        const group = new THREE.Group();
+        const bodyMat = new THREE.MeshLambertMaterial({ color });
+        const body = new THREE.Mesh(
+          new THREE.CapsuleGeometry(0.4, 0.8, 4, 8),
+          bodyMat
+        );
+        body.position.y = 0.4;
+        const head = new THREE.Mesh(
+          new THREE.SphereGeometry(0.3, 16, 16),
+          bodyMat
+        );
+        head.position.y = 1.3;
+
+        const armGeo = new THREE.BoxGeometry(0.15, 0.6, 0.15);
+        const leftArm = new THREE.Mesh(armGeo, bodyMat);
+        const rightArm = new THREE.Mesh(armGeo, bodyMat);
+        leftArm.position.set(-0.5, 0.8, 0);
+        rightArm.position.set(0.5, 0.8, 0);
+
+        group.add(body, head, leftArm, rightArm);
+        group.userData.arms = { left: leftArm, right: rightArm };
+        return group;
+      }
+
+      function createTankMesh(color) {
+        const group = new THREE.Group();
+        const tankMat = new THREE.MeshLambertMaterial({ color: 0x556655 });
+        const body = new THREE.Mesh(
+          new THREE.BoxGeometry(1.8, 0.8, 1.2),
+          tankMat
+        );
+        const turret = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.5, 0.6, 0.7, 8),
+          tankMat
+        );
+        turret.position.y = 0.7;
+        const barrel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.1, 0.1, 1.5, 8),
+          tankMat
+        );
+        barrel.rotation.z = Math.PI / 2;
+        barrel.position.set(0.7, 0.7, 0);
+        group.add(body, turret, barrel);
+        return group;
+      }
+
+      function createHarrierMesh(color) {
+        const group = new THREE.Group();
+        const shipMat = new THREE.MeshLambertMaterial({ color: 0x99aaff });
+        const body = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), shipMat);
+        body.scale.set(1, 0.5, 1.5);
+        const wing = new THREE.Mesh(
+          new THREE.BoxGeometry(3, 0.2, 0.8),
+          shipMat
+        );
+        group.add(body, wing);
+        return group;
+      }
+
+      // --- INICJALIZACJA GRACZA I KONTROLI ---
       function createHero() {
+        /* ... pozostaje bez większych zmian ... */
         const heroGroup = new THREE.Group();
         const bodyGeo = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
         const bodyMat = new THREE.MeshLambertMaterial({ color: 0x2980b9 });
@@ -799,16 +1021,7 @@
         heroGroup.add(body);
         heroGroup.add(head);
         heroGroup.userData = { type: "player", parent: gameState.player };
-        let startPos = { x: 0, z: 0 };
-        for (let z = MAP_HEIGHT - 1; z > 0; z--) {
-          for (let x = 0; x < MAP_WIDTH; x++) {
-            if (MAP_GRID[z][x] === 6) {
-              startPos = { x, z };
-              break;
-            }
-          }
-          if (startPos.x !== 0) break;
-        }
+        let startPos = { x: 10, z: MAP_HEIGHT - 5 };
         heroGroup.position.copy(gridToWorld(startPos.x, startPos.z));
         hero = heroGroup;
         scene.add(hero);
@@ -828,7 +1041,9 @@
         camera.position.copy(hero.position).add(offset);
         camera.lookAt(hero.position);
       }
+
       function findPath(start, end) {
+        /* ... A* pozostaje bez zmian ... */
         const openSet = [];
         const closedSet = [];
         const cameFrom = {};
@@ -911,8 +1126,11 @@
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
         raycaster.setFromCamera(mouse, camera);
         const intersects = raycaster.intersectObjects(scene.children, true);
+
         buildMenuEl.style.display = "none";
         trainMenuEl.style.display = "none";
+        factoryMenuEl.style.display = "none";
+
         if (intersects.length > 0) {
           let clickedObject = intersects[0].object;
           while (
@@ -931,12 +1149,21 @@
             path = [];
             return;
           }
-          if (data.type === "building" && data.building === "barracks") {
-            updateTrainMenu();
-            trainMenuEl.style.display = "flex";
-            trainMenuEl.dataset.buildingX = data.gridX;
-            trainMenuEl.dataset.buildingZ = data.gridZ;
-            return;
+          if (data.type === "building") {
+            if (data.building === "barracks") {
+              updateTrainMenu();
+              trainMenuEl.style.display = "flex";
+              trainMenuEl.dataset.buildingX = data.gridX;
+              trainMenuEl.dataset.buildingZ = data.gridZ;
+              return;
+            }
+            if (data.building === "factory") {
+              updateFactoryMenu();
+              factoryMenuEl.style.display = "flex";
+              factoryMenuEl.dataset.buildingX = data.gridX;
+              factoryMenuEl.dataset.buildingZ = data.gridZ;
+              return;
+            }
           }
 
           gameState.selectedUnits.forEach((u) => u.setSelection(false));
@@ -946,7 +1173,7 @@
           if (
             data.type === "wood" ||
             data.type === "stone" ||
-            data.type === "gold"
+            data.type === "spice"
           ) {
             targetGridPos = { x: data.gridX, z: data.gridZ };
             currentAction = {
@@ -1002,7 +1229,8 @@
             clickedObject = clickedObject.parent;
           }
           const data = clickedObject.userData;
-          const targetPos = worldToGrid(intersects[0].point);
+          const targetPoint = intersects[0].point;
+
           gameState.selectedUnits.forEach((unit) => {
             if (
               data.parent &&
@@ -1011,7 +1239,15 @@
               unit.target = data.parent;
             } else {
               unit.target = null;
-              unit.path = findPath(worldToGrid(unit.mesh.position), targetPos);
+              const targetGridPos = worldToGrid(targetPoint);
+              if (unit.stats.isFlying) {
+                unit.path = [targetGridPos]; // Latające jednostki lecą prosto
+              } else {
+                unit.path = findPath(
+                  worldToGrid(unit.mesh.position),
+                  targetGridPos
+                );
+              }
             }
           });
         }
@@ -1031,15 +1267,16 @@
         }
       }
 
+      // --- LOGIKA BUDOWANIA I TRENOWANIA ---
       function handleAction() {
         if (!currentAction || path.length > 0) return;
         const { type, target, targetGridPos } = currentAction;
         if (type === "gather") {
           const resourceType = target.userData.type;
           let amount = 0;
-          if (resourceType === "wood") amount = 10;
-          if (resourceType === "stone") amount = 5;
-          if (resourceType === "gold") amount = 3;
+          if (resourceType === "wood") amount = 20;
+          if (resourceType === "stone") amount = 15;
+          if (resourceType === "spice") amount = 10;
           gameState.resources[resourceType] += amount;
           showActionInfo(`Zebrano ${amount} ${resourceType}!`);
           scene.remove(target);
@@ -1049,16 +1286,22 @@
         currentAction = null;
       }
 
-      function updateBuildMenu() {
-        buildMenuEl.querySelectorAll(".menu-button").forEach((button) => {
-          const cost = buildingCosts[button.dataset.building];
+      function updateMenu(menuEl, costSource) {
+        menuEl.querySelectorAll(".menu-button").forEach((button) => {
+          const cost =
+            costSource[button.dataset.building] ||
+            costSource[button.dataset.unit];
           const canAfford =
             gameState.resources.wood >= cost.wood &&
             gameState.resources.stone >= cost.stone &&
-            gameState.resources.gold >= cost.gold;
+            gameState.resources.spice >= cost.spice;
           button.classList.toggle("disabled", !canAfford);
         });
       }
+      const updateBuildMenu = () => updateMenu(buildMenuEl, buildingCosts);
+      const updateTrainMenu = () => updateMenu(trainMenuEl, UNIT_STATS);
+      const updateFactoryMenu = () => updateMenu(factoryMenuEl, UNIT_STATS);
+
       function build(type) {
         const gridX = parseInt(buildMenuEl.dataset.gridX),
           gridZ = parseInt(buildMenuEl.dataset.gridZ);
@@ -1067,18 +1310,18 @@
         if (
           gameState.resources.wood >= cost.wood &&
           gameState.resources.stone >= cost.stone &&
-          gameState.resources.gold >= cost.gold
+          gameState.resources.spice >= cost.spice
         ) {
           gameState.resources.wood -= cost.wood;
           gameState.resources.stone -= cost.stone;
-          gameState.resources.gold -= cost.gold;
+          gameState.resources.spice -= cost.spice;
           const data = buildingData[type];
           const buildingMesh = new THREE.Mesh(
             new THREE.BoxGeometry(data.size.x, data.size.y, data.size.z),
             new THREE.MeshLambertMaterial({ color: data.color })
           );
           const pos = gridToWorld(gridX, gridZ);
-          pos.y = data.size.y / 2 - TILE_SIZE / 2;
+          pos.y += data.size.y / 2;
           buildingMesh.position.copy(pos);
           buildingMesh.castShadow = true;
           buildingMesh.userData = {
@@ -1103,37 +1346,26 @@
           grid[gridX][gridZ] = 1;
           gameState.buildings.push(buildingMesh);
           showActionInfo(`Zbudowano: ${data.name}`);
-          if (type === "townhall" && !gameState.playerBase) {
+          if (type === "townhall" && !gameState.playerBase)
             gameState.playerBase = buildingMesh;
-          }
         } else {
           showActionInfo("Za mało zasobów!");
         }
         buildMenuEl.style.display = "none";
       }
 
-      function updateTrainMenu() {
-        trainMenuEl.querySelectorAll(".menu-button").forEach((button) => {
-          const cost = UNIT_STATS[button.dataset.unit].cost;
-          const canAfford =
-            gameState.resources.wood >= cost.wood &&
-            gameState.resources.stone >= cost.stone &&
-            gameState.resources.gold >= cost.gold;
-          button.classList.toggle("disabled", !canAfford);
-        });
-      }
-      function trainUnit(type) {
+      function trainUnit(type, menuEl) {
         const cost = UNIT_STATS[type].cost;
         if (
           gameState.resources.wood >= cost.wood &&
           gameState.resources.stone >= cost.stone &&
-          gameState.resources.gold >= cost.gold
+          gameState.resources.spice >= cost.spice
         ) {
           gameState.resources.wood -= cost.wood;
           gameState.resources.stone -= cost.stone;
-          gameState.resources.gold -= cost.gold;
-          const buildingX = parseInt(trainMenuEl.dataset.buildingX);
-          const buildingZ = parseInt(trainMenuEl.dataset.buildingZ);
+          gameState.resources.spice -= cost.spice;
+          const buildingX = parseInt(menuEl.dataset.buildingX),
+            buildingZ = parseInt(menuEl.dataset.buildingZ);
           const spawnSpots = [
             { x: buildingX + 1, z: buildingZ },
             { x: buildingX - 1, z: buildingZ },
@@ -1148,7 +1380,7 @@
               spot.z < MAP_HEIGHT &&
               grid[spot.x][spot.z] === 0
             ) {
-              const unit = new PlayerUnit(
+              const unit = new Unit(
                 UNIT_STATS[type],
                 gridToWorld(spot.x, spot.z)
               );
@@ -1165,7 +1397,7 @@
 
       const enemySpawner = {
         timer: 0,
-        spawnInterval: 15,
+        spawnInterval: 20,
         update: (delta) => {
           enemySpawner.timer += delta;
           if (enemySpawner.timer > enemySpawner.spawnInterval) {
@@ -1173,9 +1405,10 @@
             const unitTypes = Object.keys(ENEMY_UNIT_STATS);
             const type =
               unitTypes[Math.floor(Math.random() * unitTypes.length)];
-            const unit = new EnemyUnit(
+            const unit = new Unit(
               ENEMY_UNIT_STATS[type],
-              gridToWorld(23, 5)
+              gridToWorld(24, 6),
+              true
             );
             gameState.enemyUnits.push(unit);
             showActionInfo("Wróg stworzył nową jednostkę!");
@@ -1190,28 +1423,24 @@
       minimapCanvas.height = MAP_HEIGHT * MINIMAP_SCALE;
 
       function drawMinimap() {
+        /* ... pozostaje bez większych zmian ... */
         minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
         for (let z = 0; z < MAP_HEIGHT; z++) {
           for (let x = 0; x < MAP_WIDTH; x++) {
-            let color = "#000";
+            let color = "#c2b280"; // Sand
             switch (MAP_GRID[z][x]) {
-              case 0:
-              case 6:
-                color = "#6ab04c";
-                break;
               case 1:
-                color = "#48dbfb";
-                break;
+                color = "#7f7053";
+                break; // Rock
               case 2:
-              case 5:
-                color = "#7f8c8d";
-                break;
+                color = "#A9A9A9";
+                break; // Stone resource
               case 3:
-                color = "#27ae60";
-                break;
-              case 4:
-                color = "#c0392b";
-                break;
+                color = "#556b2f";
+                break; // Biomass resource
+              case 5:
+                color = "#e89f39";
+                break; // Spice resource
               case 7:
                 color = "#550055";
                 break;
@@ -1274,22 +1503,26 @@
         minimapCtx.fill();
       }
 
+      // --- PĘTLA GŁÓWNA ---
       const clock = new THREE.Clock();
       function animate() {
         requestAnimationFrame(animate);
         const delta = clock.getDelta();
+        const elapsedTime = clock.getElapsedTime();
 
         if (path.length > 0) {
           const targetNode = path[0];
           const targetPos = gridToWorld(targetNode.x, targetNode.z);
           const direction = targetPos.clone().sub(hero.position).normalize();
           hero.position.add(direction.multiplyScalar(5 * delta));
+          // Płynne dopasowanie bohatera do terenu
+          const heroGridPos = worldToGrid(hero.position);
+          hero.position.y = getHeight(heroGridPos.x, heroGridPos.z);
+
           if (hero.position.distanceTo(targetPos) < 0.2) {
             hero.position.copy(targetPos);
             path.shift();
-            if (path.length === 0) {
-              handleAction();
-            }
+            if (path.length === 0) handleAction();
           }
           updateCameraPosition();
         }
@@ -1312,14 +1545,16 @@
           unit.update(delta, clock, enemyPotentialTargets, gameState.playerBase)
         );
 
+        // Aktualizacja UI
         healthBarFillEl.style.width = `${
           (gameState.player.health / gameState.player.maxHealth) * 100
         }%`;
         woodAmountEl.textContent = gameState.resources.wood;
         stoneAmountEl.textContent = gameState.resources.stone;
-        goldAmountEl.textContent = gameState.resources.gold;
+        spiceAmountEl.textContent = gameState.resources.spice;
 
         enemySpawner.update(delta);
+        sandWormManager.update(delta, clock);
         drawMinimap();
         renderer.render(scene, camera);
       }
@@ -1353,13 +1588,28 @@
         );
         document.querySelectorAll("#train-menu .menu-button").forEach((b) =>
           b.addEventListener("click", (e) => {
-            if (!b.classList.contains("disabled")) trainUnit(b.dataset.unit);
+            if (!b.classList.contains("disabled"))
+              trainUnit(b.dataset.unit, trainMenuEl);
+            e.stopPropagation();
+          })
+        );
+        document.querySelectorAll("#factory-menu .menu-button").forEach((b) =>
+          b.addEventListener("click", (e) => {
+            if (!b.classList.contains("disabled"))
+              trainUnit(b.dataset.unit, factoryMenuEl);
             e.stopPropagation();
           })
         );
 
         animate();
-        showActionInfo("Witaj! Poruszaj się LPM. Naciśnij 'B' by budować.");
+        showActionInfo(
+          "Witaj na Pustynnej Planecie! Poruszaj się LPM. Naciśnij 'B' by budować.",
+          4000
+        );
+        showActionInfo(
+          "Uważaj na wibracje na piasku... Czerwie są głodne.",
+          4000
+        );
       }
 
       init();
