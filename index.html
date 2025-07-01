@@ -1,0 +1,1292 @@
+<!DOCTYPE html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Izometryczna Gra RTS - Voxel World</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background-color: #111;
+        color: white;
+      }
+      #game-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+      }
+      canvas {
+        display: block;
+      }
+      #ui-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none; /* Pozwala na klikanie "przez" UI */
+      }
+
+      /* --- Górny Pasek --- */
+      #top-bar {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 10px;
+        border-radius: 8px;
+        border: 1px solid #444;
+      }
+      #health-bar-container {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      #health-bar {
+        width: 200px;
+        height: 20px;
+        background-color: #550000;
+        border: 1px solid #ff0000;
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      #health-bar-fill {
+        width: 100%;
+        height: 100%;
+        background-color: #ff0000;
+        transition: width 0.3s ease-in-out;
+      }
+      #resource-display {
+        display: flex;
+        gap: 15px;
+      }
+      .resource {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 16px;
+        font-weight: bold;
+      }
+
+      /* --- Minimapa --- */
+      #minimap-container {
+        position: absolute;
+        bottom: 10px;
+        right: 10px;
+        border: 2px solid #666;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 5px;
+      }
+      #minimap {
+        display: block;
+      }
+
+      /* --- Menu Budowy --- */
+      #build-menu {
+        position: absolute;
+        bottom: 10px;
+        left: 10px;
+        background: rgba(0, 0, 0, 0.7);
+        border: 1px solid #555;
+        border-radius: 8px;
+        padding: 10px;
+        display: none; /* Ukryte domyślnie */
+        pointer-events: all;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .build-button {
+        background: #444;
+        color: white;
+        border: 1px solid #777;
+        padding: 8px 12px;
+        cursor: pointer;
+        width: 180px;
+        text-align: left;
+        border-radius: 4px;
+      }
+      .build-button:hover {
+        background: #5a5a5a;
+      }
+      .build-button.disabled {
+        background: #333;
+        color: #888;
+        cursor: not-allowed;
+        border-color: #555;
+      }
+
+      /* --- Komunikaty --- */
+      #action-info {
+        position: absolute;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.7);
+        padding: 10px 20px;
+        border-radius: 20px;
+        font-size: 16px;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game-container"></div>
+
+    <div id="ui-container">
+      <!-- Górny pasek z życiem i zasobami -->
+      <div id="top-bar">
+        <div id="health-bar-container">
+          <span>❤️</span>
+          <div id="health-bar">
+            <div id="health-bar-fill"></div>
+          </div>
+        </div>
+        <div id="resource-display">
+          <div class="resource">🌲 <span id="wood-amount">0</span></div>
+          <div class="resource">⛏️ <span id="stone-amount">0</span></div>
+          <div class="resource">💰 <span id="gold-amount">0</span></div>
+        </div>
+      </div>
+
+      <!-- Minimapa -->
+      <div id="minimap-container">
+        <canvas id="minimap"></canvas>
+      </div>
+
+      <!-- Menu budowania -->
+      <div id="build-menu">
+        <button class="build-button" data-building="townhall">
+          Ratusz (150🌲 100⛏️)
+        </button>
+        <button class="build-button" data-building="barracks">
+          Koszary (100🌲 50⛏️)
+        </button>
+        <button class="build-button" data-building="goldmine">
+          Kopalnia Złota (80🌲 120⛏️)
+        </button>
+        <button class="build-button" data-building="church">
+          Kościół (50🌲 50⛏️ 50💰)
+        </button>
+        <button class="build-button" data-building="blacksmith">
+          Kuźnia (75⛏️ 50💰)
+        </button>
+        <button class="build-button" data-building="siegeworkshop">
+          Warsztat Oblężniczy (150🌲 100💰)
+        </button>
+      </div>
+
+      <!-- Informacje o akcjach -->
+      <div id="action-info"></div>
+    </div>
+
+    <!-- Importmap do wczytania Three.js z CDN -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      // ====================================================================
+      // GŁÓWNE ZMIENNE I KONFIGURACJA
+      // ====================================================================
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x87ceeb); // Kolor nieba
+
+      const TILE_SIZE = 2;
+      const MAP_WIDTH = 50;
+      const MAP_HEIGHT = 50;
+
+      const camera = new THREE.PerspectiveCamera(
+        45,
+        window.innerWidth / window.innerHeight,
+        1,
+        1000
+      );
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document
+        .getElementById("game-container")
+        .appendChild(renderer.domElement);
+
+      // Światło
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+      directionalLight.position.set(-30, 50, 20);
+      directionalLight.castShadow = true;
+      directionalLight.shadow.mapSize.width = 2048;
+      directionalLight.shadow.mapSize.height = 2048;
+      directionalLight.shadow.camera.left = -80;
+      directionalLight.shadow.camera.right = 80;
+      directionalLight.shadow.camera.top = 80;
+      directionalLight.shadow.camera.bottom = -80;
+      scene.add(directionalLight);
+
+      // Stan gry
+      const gameState = {
+        resources: { wood: 200, stone: 150, gold: 0 },
+        player: {
+          health: 100,
+          maxHealth: 100,
+          damage: 10,
+          attackSpeed: 1.0, // sekundy
+          lastAttackTime: 0,
+        },
+        enemies: [],
+        buildings: [],
+      };
+
+      // Obiekty gry
+      let hero;
+      let path = []; // Ścieżka dla bohatera
+      const worldObjects = {}; // Przechowuje obiekty na mapie (drzewa, skały itp.)
+      const grid = Array(MAP_WIDTH)
+        .fill(null)
+        .map(() => Array(MAP_HEIGHT).fill(0)); // 0: walkable, 1: blocked
+
+      // Elementy UI
+      const woodAmountEl = document.getElementById("wood-amount");
+      const stoneAmountEl = document.getElementById("stone-amount");
+      const goldAmountEl = document.getElementById("gold-amount");
+      const healthBarFillEl = document.getElementById("health-bar-fill");
+      const buildMenuEl = document.getElementById("build-menu");
+      const actionInfoEl = document.getElementById("action-info");
+
+      // Mapa gry (0: trawa, 1: woda, 2: kamień, 3: drzewo, 4: baza wroga, 5: złoto, 6: wioska startowa)
+      const MAP_GRID = [
+        [
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1,
+        ],
+        [
+          1, 4, 4, 4, 1, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 2, 2, 2, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 5, 5,
+          5, 1, 1, 1,
+        ],
+        [
+          1, 4, 0, 4, 1, 3, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0,
+          5, 1, 1, 1,
+        ],
+        [
+          1, 4, 4, 4, 1, 3, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 5,
+          5, 1, 1, 1,
+        ],
+        [
+          1, 1, 1, 1, 1, 3, 0, 0, 0, 0, 0, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+          1, 1, 1, 1,
+        ],
+        [
+          1, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 3, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+        [
+          1, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
+        ],
+      ];
+
+      // Dopełnienie mapy
+      while (MAP_GRID.length < MAP_HEIGHT) {
+        const row = [1];
+        for (let i = 1; i < MAP_WIDTH - 1; i++) {
+          if (
+            MAP_GRID.length > MAP_HEIGHT - 6 &&
+            i > MAP_WIDTH - 25 &&
+            i < MAP_WIDTH - 20
+          ) {
+            row.push(6); // Wioska startowa
+          } else {
+            let val = 0; // Trawa
+            if (Math.random() < 0.15) val = 3; // Drzewo
+            if (Math.random() < 0.05) val = 2; // Skała
+            row.push(val);
+          }
+        }
+        row.push(1);
+        MAP_GRID.push(row);
+      }
+      const lastRow = Array(MAP_WIDTH).fill(1);
+      MAP_GRID.push(lastRow);
+
+      const buildingCosts = {
+        townhall: { wood: 150, stone: 100, gold: 0 },
+        barracks: { wood: 100, stone: 50, gold: 0 },
+        goldmine: { wood: 80, stone: 120, gold: 0 },
+        church: { wood: 50, stone: 50, gold: 50 },
+        blacksmith: { wood: 0, stone: 75, gold: 50 },
+        siegeworkshop: { wood: 150, stone: 0, gold: 100 },
+      };
+
+      const buildingData = {
+        townhall: { name: "Ratusz", color: 0xaaaaaa },
+        barracks: { name: "Koszary", color: 0x8b4513 },
+        goldmine: { name: "Kopalnia Złota", color: 0xffd700 },
+        church: { name: "Kościół", color: 0xffffff },
+        blacksmith: { name: "Kuźnia", color: 0x404040 },
+        siegeworkshop: { name: "Warsztat Oblężniczy", color: 0x654321 },
+      };
+
+      // ====================================================================
+      // FUNKCJE POMOCNICZE
+      // ====================================================================
+
+      function gridToWorld(x, z) {
+        return new THREE.Vector3(x * TILE_SIZE, 0, z * TILE_SIZE);
+      }
+
+      function worldToGrid(position) {
+        return {
+          x: Math.round(position.x / TILE_SIZE),
+          z: Math.round(position.z / TILE_SIZE),
+        };
+      }
+
+      function showActionInfo(text) {
+        actionInfoEl.textContent = text;
+        actionInfoEl.style.display = "block";
+        setTimeout(() => {
+          actionInfoEl.style.display = "none";
+        }, 2000);
+      }
+
+      // ====================================================================
+      // TWORZENIE ŚWIATA
+      // ====================================================================
+
+      function generateWorld() {
+        const materials = {
+          grass: new THREE.MeshLambertMaterial({ color: 0x6ab04c }),
+          water: new THREE.MeshLambertMaterial({
+            color: 0x48dbfb,
+            transparent: true,
+            opacity: 0.7,
+          }),
+          rock: new THREE.MeshLambertMaterial({ color: 0x7f8c8d }),
+          treeTrunk: new THREE.MeshLambertMaterial({ color: 0x8d6e63 }),
+          treeLeaves: new THREE.MeshLambertMaterial({ color: 0x27ae60 }),
+          enemyBase: new THREE.MeshLambertMaterial({ color: 0xc0392b }),
+          gold: new THREE.MeshLambertMaterial({ color: 0xf1c40f }),
+          startVillage: new THREE.MeshLambertMaterial({ color: 0xbdc3c7 }),
+        };
+
+        const groundGeometry = new THREE.BoxGeometry(
+          TILE_SIZE,
+          TILE_SIZE,
+          TILE_SIZE
+        );
+
+        for (let z = 0; z < MAP_HEIGHT; z++) {
+          for (let x = 0; x < MAP_WIDTH; x++) {
+            const tileType = MAP_GRID[z][x];
+            const pos = gridToWorld(x, z);
+            pos.y -= TILE_SIZE / 2;
+            let groundTile;
+
+            switch (tileType) {
+              case 1: // Woda
+                groundTile = new THREE.Mesh(groundGeometry, materials.water);
+                pos.y -= TILE_SIZE / 2; // Woda jest niżej
+                grid[x][z] = 1; // Zablokowane
+                break;
+              case 2: // Skała
+              case 5: // Złoto
+                groundTile = new THREE.Mesh(groundGeometry, materials.grass);
+                scene.add(groundTile);
+                groundTile.position.copy(pos);
+
+                const resourceGeo = new THREE.BoxGeometry(
+                  TILE_SIZE * 0.8,
+                  TILE_SIZE * 1.5,
+                  TILE_SIZE * 0.8
+                );
+                const resourceMesh = new THREE.Mesh(
+                  resourceGeo,
+                  tileType === 2 ? materials.rock : materials.gold
+                );
+                resourceMesh.position.set(pos.x, TILE_SIZE / 2, pos.z);
+                resourceMesh.castShadow = true;
+                resourceMesh.userData = {
+                  type: tileType === 2 ? "stone" : "gold",
+                  gridX: x,
+                  gridZ: z,
+                };
+                scene.add(resourceMesh);
+                worldObjects[`${x},${z}`] = resourceMesh;
+                grid[x][z] = 1;
+                continue; // Przejdź do następnej pętli
+              case 3: // Drzewo
+                groundTile = new THREE.Mesh(groundGeometry, materials.grass);
+                scene.add(groundTile);
+                groundTile.position.copy(pos);
+
+                const trunk = new THREE.Mesh(
+                  new THREE.CylinderGeometry(0.3, 0.4, TILE_SIZE * 1.5, 8),
+                  materials.treeTrunk
+                );
+                trunk.position.set(pos.x, TILE_SIZE * 0.75, pos.z);
+                const leaves = new THREE.Mesh(
+                  new THREE.DodecahedronGeometry(TILE_SIZE * 0.8),
+                  materials.treeLeaves
+                );
+                leaves.position.set(pos.x, TILE_SIZE * 2, pos.z);
+                trunk.castShadow = true;
+                leaves.castShadow = true;
+
+                const tree = new THREE.Group();
+                tree.add(trunk);
+                tree.add(leaves);
+                tree.userData = { type: "wood", gridX: x, gridZ: z };
+                scene.add(tree);
+                worldObjects[`${x},${z}`] = tree;
+                grid[x][z] = 1;
+                continue;
+              case 4: // Baza wroga
+                groundTile = new THREE.Mesh(
+                  groundGeometry,
+                  materials.enemyBase
+                );
+                grid[x][z] = 1;
+                break;
+              case 6: // Wioska
+                groundTile = new THREE.Mesh(
+                  groundGeometry,
+                  materials.startVillage
+                );
+                break;
+              default: // Trawa
+                groundTile = new THREE.Mesh(groundGeometry, materials.grass);
+                break;
+            }
+
+            groundTile.position.copy(pos);
+            groundTile.receiveShadow = true;
+            scene.add(groundTile);
+          }
+        }
+      }
+
+      // ====================================================================
+      // BOHATER
+      // ====================================================================
+
+      function createHero() {
+        const heroGroup = new THREE.Group();
+        const bodyGeo = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
+        const bodyMat = new THREE.MeshLambertMaterial({ color: 0x2980b9 });
+        const body = new THREE.Mesh(bodyGeo, bodyMat);
+        body.castShadow = true;
+        body.position.y = 1;
+
+        const headGeo = new THREE.SphereGeometry(0.4, 16, 16);
+        const headMat = new THREE.MeshLambertMaterial({ color: 0xf1c40f });
+        const head = new THREE.Mesh(headGeo, headMat);
+        head.position.y = 2.0;
+
+        heroGroup.add(body);
+        heroGroup.add(head);
+
+        heroGroup.userData = { type: "player" };
+
+        let startPos = { x: 0, z: 0 };
+        // Znajdź pozycję startową
+        for (let z = 0; z < MAP_HEIGHT; z++) {
+          for (let x = 0; x < MAP_WIDTH; x++) {
+            if (MAP_GRID[z][x] === 6) {
+              startPos = { x, z };
+              break;
+            }
+          }
+          if (startPos.x !== 0) break;
+        }
+
+        heroGroup.position.copy(gridToWorld(startPos.x, startPos.z));
+        hero = heroGroup;
+        scene.add(hero);
+
+        // Inicjalizacja kamery
+        updateCameraPosition();
+      }
+
+      function updateCameraPosition() {
+        const offset = new THREE.Vector3(15, 20, 15);
+        camera.position.copy(hero.position).add(offset);
+        camera.lookAt(hero.position);
+      }
+
+      // ====================================================================
+      // WROGOWIE I AI
+      // ====================================================================
+      class Enemy {
+        constructor(x, z, patrolPath) {
+          this.health = 50;
+          this.maxHealth = 50;
+          this.damage = 5;
+          this.attackSpeed = 1.5;
+          this.lastAttackTime = 0;
+          this.attackRange = 2 * TILE_SIZE;
+          this.sightRange = 10 * TILE_SIZE;
+          this.patrolPath = patrolPath;
+          this.patrolIndex = 0;
+          this.state = "patrol"; // patrol, chase, attack
+
+          const geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+          const mat = new THREE.MeshLambertMaterial({ color: 0xe74c3c });
+          this.mesh = new THREE.Mesh(geo, mat);
+          this.mesh.castShadow = true;
+          this.mesh.position.copy(gridToWorld(x, z));
+          this.mesh.position.y = 0.6;
+          this.mesh.userData = { type: "enemy", parent: this };
+          scene.add(this.mesh);
+
+          this.path = [];
+
+          const healthBarGeo = new THREE.PlaneGeometry(1.5, 0.2);
+          const healthBarMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+          this.healthBar = new THREE.Mesh(healthBarGeo, healthBarMat);
+          this.healthBar.position.y = 2.0;
+          this.mesh.add(this.healthBar);
+        }
+
+        update(delta, clock) {
+          const playerPos = hero.position;
+          const enemyPos = this.mesh.position;
+          const distanceToPlayer = playerPos.distanceTo(enemyPos);
+
+          // Update stanu AI
+          if (distanceToPlayer <= this.attackRange) {
+            this.state = "attack";
+          } else if (distanceToPlayer <= this.sightRange) {
+            this.state = "chase";
+          } else {
+            this.state = "patrol";
+          }
+
+          // Logika stanów
+          switch (this.state) {
+            case "patrol":
+              if (this.path.length === 0) {
+                const targetPatrolPoint = this.patrolPath[this.patrolIndex];
+                const currentGridPos = worldToGrid(this.mesh.position);
+                if (
+                  currentGridPos.x === targetPatrolPoint.x &&
+                  currentGridPos.z === targetPatrolPoint.z
+                ) {
+                  this.patrolIndex =
+                    (this.patrolIndex + 1) % this.patrolPath.length;
+                } else {
+                  this.path = findPath(currentGridPos, targetPatrolPoint);
+                }
+              }
+              break;
+            case "chase":
+              // Aktualizuj ścieżkę do gracza co jakiś czas
+              if (Math.random() < 0.1) {
+                this.path = findPath(
+                  worldToGrid(this.mesh.position),
+                  worldToGrid(hero.position)
+                );
+              }
+              break;
+            case "attack":
+              this.path = []; // Zatrzymaj się, by atakować
+              if (
+                clock.getElapsedTime() - this.lastAttackTime >
+                this.attackSpeed
+              ) {
+                gameState.player.health -= this.damage;
+                this.lastAttackTime = clock.getElapsedTime();
+                showActionInfo(`Otrzymano ${this.damage} obrażeń!`);
+                if (gameState.player.health <= 0) {
+                  showActionInfo("Zostałeś pokonany!");
+                  gameState.player.health = 0;
+                  // Tu można dodać logikę końca gry
+                }
+              }
+              break;
+          }
+
+          this.moveAlongPath(delta);
+          this.healthBar.lookAt(camera.position);
+        }
+
+        moveAlongPath(delta) {
+          if (this.path && this.path.length > 0) {
+            const targetNode = this.path[0];
+            const targetPos = gridToWorld(targetNode.x, targetNode.z);
+            targetPos.y = this.mesh.position.y; // Nie zmieniaj wysokości
+
+            const direction = targetPos
+              .clone()
+              .sub(this.mesh.position)
+              .normalize();
+            const speed = 3 * delta;
+            this.mesh.position.add(direction.multiplyScalar(speed));
+
+            if (this.mesh.position.distanceTo(targetPos) < 0.2) {
+              this.mesh.position.copy(targetPos);
+              this.path.shift();
+            }
+          }
+        }
+
+        takeDamage(amount) {
+          this.health -= amount;
+          if (this.health <= 0) {
+            this.health = 0;
+            this.die();
+          }
+          this.healthBar.scale.x = this.health / this.maxHealth;
+        }
+
+        die() {
+          scene.remove(this.mesh);
+          const index = gameState.enemies.indexOf(this);
+          if (index > -1) {
+            gameState.enemies.splice(index, 1);
+          }
+        }
+      }
+
+      function spawnEnemies() {
+        const enemy = new Enemy(4, 2, [
+          { x: 2, z: 2 },
+          { x: 2, z: 4 },
+          { x: 4, z: 4 },
+        ]);
+        gameState.enemies.push(enemy);
+        const enemy2 = new Enemy(3, 3, [
+          { x: 2, z: 3 },
+          { x: 4, z: 3 },
+        ]);
+        gameState.enemies.push(enemy2);
+      }
+
+      // ====================================================================
+      // RUCH I PATHFINDING (A*)
+      // ====================================================================
+
+      function findPath(start, end) {
+        const openSet = [];
+        const closedSet = [];
+        const cameFrom = {};
+
+        const gScore = {}; // koszt od startu
+        const fScore = {}; // gScore + heurystyka
+
+        function heuristic(a, b) {
+          return Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
+        }
+
+        const startKey = `${start.x},${start.z}`;
+        gScore[startKey] = 0;
+        fScore[startKey] = heuristic(start, end);
+        openSet.push({ x: start.x, z: start.z });
+
+        while (openSet.length > 0) {
+          // Znajdź węzeł z najniższym fScore
+          let lowestIndex = 0;
+          for (let i = 1; i < openSet.length; i++) {
+            if (
+              fScore[`${openSet[i].x},${openSet[i].z}`] <
+              fScore[`${openSet[lowestIndex].x},${openSet[lowestIndex].z}`]
+            ) {
+              lowestIndex = i;
+            }
+          }
+          const current = openSet[lowestIndex];
+
+          if (current.x === end.x && current.z === end.z) {
+            // Rekonstrukcja ścieżki
+            const totalPath = [current];
+            let temp = current;
+            while (cameFrom[`${temp.x},${temp.z}`]) {
+              temp = cameFrom[`${temp.x},${temp.z}`];
+              totalPath.unshift(temp);
+            }
+            return totalPath;
+          }
+
+          openSet.splice(lowestIndex, 1);
+          closedSet.push(current);
+
+          const neighbors = [
+            { x: current.x + 1, z: current.z },
+            { x: current.x - 1, z: current.z },
+            { x: current.x, z: current.z + 1 },
+            { x: current.x, z: current.z - 1 },
+          ];
+
+          for (const neighbor of neighbors) {
+            // Sprawdź granice mapy i czy jest przejezdne
+            if (
+              neighbor.x < 0 ||
+              neighbor.x >= MAP_WIDTH ||
+              neighbor.z < 0 ||
+              neighbor.z >= MAP_HEIGHT ||
+              grid[neighbor.x][neighbor.z] === 1
+            ) {
+              continue;
+            }
+
+            if (
+              closedSet.find((c) => c.x === neighbor.x && c.z === neighbor.z)
+            ) {
+              continue;
+            }
+
+            const tentativeGScore = gScore[`${current.x},${current.z}`] + 1;
+            const neighborKey = `${neighbor.x},${neighbor.z}`;
+
+            if (
+              !openSet.find((o) => o.x === neighbor.x && o.z === neighbor.z)
+            ) {
+              openSet.push(neighbor);
+            } else if (tentativeGScore >= gScore[neighborKey]) {
+              continue;
+            }
+
+            cameFrom[neighborKey] = current;
+            gScore[neighborKey] = tentativeGScore;
+            fScore[neighborKey] =
+              gScore[neighborKey] + heuristic(neighbor, end);
+          }
+        }
+        return []; // Brak ścieżki
+      }
+
+      // ====================================================================
+      // INTERAKCJE I AKCJE
+      // ====================================================================
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      let currentAction = null; // { type, target, targetGridPos }
+
+      function onMouseClick(event) {
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+
+        const intersects = raycaster.intersectObjects(scene.children, true);
+
+        buildMenuEl.style.display = "none"; // Zamknij menu budowy przy kliknięciu
+
+        if (intersects.length > 0) {
+          let clickedObject = intersects[0].object;
+
+          // Szukaj nadrzędnego obiektu, jeśli kliknięto część grupy
+          while (
+            clickedObject.parent &&
+            clickedObject.parent.type !== "Scene"
+          ) {
+            if (clickedObject.userData.type) break;
+            clickedObject = clickedObject.parent;
+          }
+          const data = clickedObject.userData;
+
+          const currentGridPos = worldToGrid(hero.position);
+          let targetGridPos;
+
+          if (data.type) {
+            // Kliknięcie na obiekt interaktywny
+            targetGridPos =
+              data.gridX !== undefined
+                ? { x: data.gridX, z: data.gridZ }
+                : worldToGrid(clickedObject.position);
+
+            if (
+              data.type === "wood" ||
+              data.type === "stone" ||
+              data.type === "gold"
+            ) {
+              currentAction = {
+                type: "gather",
+                target: clickedObject,
+                targetGridPos,
+              };
+            } else if (data.type === "enemy") {
+              currentAction = {
+                type: "attack",
+                target: data.parent,
+                targetGridPos,
+              };
+            } else if (data.type === "building") {
+              handleBuildingClick(data.building);
+              currentAction = null;
+              path = [];
+              return;
+            }
+          } else {
+            // Kliknięcie na ziemię
+            targetGridPos = worldToGrid(intersects[0].point);
+            currentAction = { type: "move", targetGridPos };
+          }
+
+          // Wygeneruj ścieżkę do celu lub sąsiedniego pola
+          if (currentAction) {
+            path = findPath(currentGridPos, targetGridPos);
+            // Jeśli cel jest zablokowany, znajdź ścieżkę do najbliższego wolnego pola
+            if (
+              path.length === 0 &&
+              (currentAction.type === "gather" ||
+                currentAction.type === "attack")
+            ) {
+              const neighbors = [
+                { x: targetGridPos.x + 1, z: targetGridPos.z },
+                { x: targetGridPos.x - 1, z: targetGridPos.z },
+                { x: targetGridPos.x, z: targetGridPos.z + 1 },
+                { x: targetGridPos.x, z: targetGridPos.z - 1 },
+              ];
+              for (const n of neighbors) {
+                if (
+                  n.x >= 0 &&
+                  n.x < MAP_WIDTH &&
+                  n.z >= 0 &&
+                  n.z < MAP_HEIGHT &&
+                  grid[n.x][n.z] === 0
+                ) {
+                  path = findPath(currentGridPos, n);
+                  if (path.length > 0) break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      function onRightClick(event) {
+        event.preventDefault();
+        const currentGridPos = worldToGrid(hero.position);
+
+        if (grid[currentGridPos.x][currentGridPos.z] === 0) {
+          updateBuildMenu();
+          buildMenuEl.style.display = "flex";
+          // Zapamiętaj pozycję do budowy
+          buildMenuEl.dataset.gridX = currentGridPos.x;
+          buildMenuEl.dataset.gridZ = currentGridPos.z;
+        } else {
+          showActionInfo("Nie można budować na tym polu.");
+        }
+      }
+
+      function handleAction(clock) {
+        if (!currentAction || path.length > 0) return; // Wykonaj akcję dopiero po dojściu do celu
+
+        const { type, target, targetGridPos } = currentAction;
+
+        switch (type) {
+          case "gather":
+            const resourceType = target.userData.type;
+            let amount = 0;
+            if (resourceType === "wood") amount = 10;
+            if (resourceType === "stone") amount = 5;
+            if (resourceType === "gold") amount = 3;
+
+            gameState.resources[resourceType] += amount;
+            showActionInfo(`Zebrano ${amount} ${resourceType}!`);
+
+            scene.remove(target);
+            delete worldObjects[`${targetGridPos.x},${targetGridPos.z}`];
+            grid[targetGridPos.x][targetGridPos.z] = 0; // Pole staje się przejezdne
+            break;
+          case "attack":
+            if (
+              clock.getElapsedTime() - gameState.player.lastAttackTime >
+              gameState.player.attackSpeed
+            ) {
+              target.takeDamage(gameState.player.damage);
+              gameState.player.lastAttackTime = clock.getElapsedTime();
+
+              if (target.health <= 0) {
+                showActionInfo("Wróg pokonany!");
+                currentAction = null; // Zakończ atakowanie
+              }
+            }
+            // Jeśli wróg uciekł, przestań go atakować
+            if (
+              hero.position.distanceTo(target.mesh.position) >
+              3 * TILE_SIZE
+            ) {
+              currentAction = null;
+            }
+            break;
+        }
+
+        // Zresetuj akcję po jednorazowym wykonaniu (poza atakiem, który jest ciągły)
+        if (type === "gather") {
+          currentAction = null;
+        }
+      }
+
+      // ====================================================================
+      // BUDOWANIE
+      // ====================================================================
+
+      function updateBuildMenu() {
+        const buttons = buildMenuEl.querySelectorAll(".build-button");
+        buttons.forEach((button) => {
+          const buildingType = button.dataset.building;
+          const cost = buildingCosts[buildingType];
+          const canAfford =
+            gameState.resources.wood >= cost.wood &&
+            gameState.resources.stone >= cost.stone &&
+            gameState.resources.gold >= cost.gold;
+          if (canAfford) {
+            button.classList.remove("disabled");
+          } else {
+            button.classList.add("disabled");
+          }
+        });
+      }
+
+      function build(type) {
+        const gridX = parseInt(buildMenuEl.dataset.gridX);
+        const gridZ = parseInt(buildMenuEl.dataset.gridZ);
+
+        if (isNaN(gridX) || isNaN(gridZ)) return;
+
+        const cost = buildingCosts[type];
+        if (
+          gameState.resources.wood >= cost.wood &&
+          gameState.resources.stone >= cost.stone &&
+          gameState.resources.gold >= cost.gold
+        ) {
+          gameState.resources.wood -= cost.wood;
+          gameState.resources.stone -= cost.stone;
+          gameState.resources.gold -= cost.gold;
+
+          const data = buildingData[type];
+          const buildingGeo = new THREE.BoxGeometry(
+            TILE_SIZE,
+            TILE_SIZE * 2,
+            TILE_SIZE
+          );
+          const buildingMat = new THREE.MeshLambertMaterial({
+            color: data.color,
+          });
+          const buildingMesh = new THREE.Mesh(buildingGeo, buildingMat);
+
+          const pos = gridToWorld(gridX, gridZ);
+          pos.y = TILE_SIZE / 2;
+          buildingMesh.position.copy(pos);
+          buildingMesh.castShadow = true;
+          buildingMesh.receiveShadow = true;
+          buildingMesh.userData = {
+            type: "building",
+            building: type,
+            gridX,
+            gridZ,
+          };
+
+          scene.add(buildingMesh);
+          grid[gridX][gridZ] = 1; // Zablokuj pole
+          gameState.buildings.push(buildingMesh);
+          showActionInfo(`Zbudowano: ${data.name}`);
+        } else {
+          showActionInfo("Za mało zasobów!");
+        }
+        buildMenuEl.style.display = "none";
+      }
+
+      function handleBuildingClick(buildingType) {
+        let unitGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+        let unitMat;
+
+        switch (buildingType) {
+          case "barracks":
+            unitMat = new THREE.MeshLambertMaterial({ color: 0x0000ff }); // Niebieski żołnierz
+            showActionInfo("Wytrenowano Żołnierza!");
+            break;
+          case "church":
+            unitMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // Biały kapłan
+            showActionInfo("Wytrenowano Kapłana!");
+            // Ulecz bohatera
+            gameState.player.health = Math.min(
+              gameState.player.maxHealth,
+              gameState.player.health + 20
+            );
+            break;
+          case "siegeworkshop":
+            unitGeo = new THREE.BoxGeometry(1.5, 1, 2);
+            unitMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // Brązowa machina
+            showActionInfo("Zbudowano Machinę oblężniczą!");
+            break;
+          case "blacksmith":
+            showActionInfo("Ulepszono broń! (+2 obrażeń)");
+            gameState.player.damage += 2;
+            return; // Nic nie tworzymy
+          case "townhall":
+            showActionInfo("Ratusz - centrum dowodzenia.");
+            return;
+          default:
+            return;
+        }
+
+        const building = gameState.buildings.find(
+          (b) => b.userData.building === buildingType
+        );
+        if (building) {
+          const unit = new THREE.Mesh(unitGeo, unitMat);
+          unit.position.copy(building.position);
+          // Znajdź wolne miejsce obok budynku
+          const { gridX, gridZ } = building.userData;
+          const spawnSpots = [
+            { x: gridX + 1, z: gridZ },
+            { x: gridX - 1, z: gridZ },
+            { x: gridX, z: gridZ + 1 },
+            { x: gridX, z: gridZ - 1 },
+          ];
+          for (const spot of spawnSpots) {
+            if (
+              spot.x >= 0 &&
+              spot.x < MAP_WIDTH &&
+              spot.z >= 0 &&
+              spot.z < MAP_HEIGHT &&
+              grid[spot.x][spot.z] === 0
+            ) {
+              unit.position.copy(gridToWorld(spot.x, spot.z));
+              unit.position.y = 0.4;
+              scene.add(unit);
+              return;
+            }
+          }
+          showActionInfo("Brak miejsca na stworzenie jednostki!");
+        }
+      }
+
+      // ====================================================================
+      // MINIMAPA
+      // ====================================================================
+
+      const minimapCanvas = document.getElementById("minimap");
+      const minimapCtx = minimapCanvas.getContext("2d");
+      const MINIMAP_SCALE = 4;
+      minimapCanvas.width = MAP_WIDTH * MINIMAP_SCALE;
+      minimapCanvas.height = MAP_HEIGHT * MINIMAP_SCALE;
+
+      function drawMinimap() {
+        minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+
+        // Tło
+        for (let z = 0; z < MAP_HEIGHT; z++) {
+          for (let x = 0; x < MAP_WIDTH; x++) {
+            switch (MAP_GRID[z][x]) {
+              case 0:
+              case 6:
+                minimapCtx.fillStyle = "#6ab04c";
+                break; // grass
+              case 1:
+                minimapCtx.fillStyle = "#48dbfb";
+                break; // water
+              case 2:
+              case 5:
+                minimapCtx.fillStyle = "#7f8c8d";
+                break; // rock/gold
+              case 3:
+                minimapCtx.fillStyle = "#27ae60";
+                break; // tree
+              case 4:
+                minimapCtx.fillStyle = "#c0392b";
+                break; // enemy base
+              default:
+                minimapCtx.fillStyle = "#000";
+            }
+            minimapCtx.fillRect(
+              x * MINIMAP_SCALE,
+              z * MINIMAP_SCALE,
+              MINIMAP_SCALE,
+              MINIMAP_SCALE
+            );
+          }
+        }
+
+        // Budynki gracza
+        minimapCtx.fillStyle = "#ffffff";
+        gameState.buildings.forEach((b) => {
+          const { gridX, gridZ } = b.userData;
+          minimapCtx.fillRect(
+            gridX * MINIMAP_SCALE,
+            gridZ * MINIMAP_SCALE,
+            MINIMAP_SCALE,
+            MINIMAP_SCALE
+          );
+        });
+
+        // Wrogowie
+        minimapCtx.fillStyle = "red";
+        gameState.enemies.forEach((enemy) => {
+          const pos = worldToGrid(enemy.mesh.position);
+          minimapCtx.beginPath();
+          minimapCtx.arc(
+            pos.x * MINIMAP_SCALE + MINIMAP_SCALE / 2,
+            pos.z * MINIMAP_SCALE + MINIMAP_SCALE / 2,
+            MINIMAP_SCALE,
+            0,
+            2 * Math.PI
+          );
+          minimapCtx.fill();
+        });
+
+        // Gracz
+        minimapCtx.fillStyle = "yellow";
+        const playerPos = worldToGrid(hero.position);
+        minimapCtx.beginPath();
+        // --- POPRAWIONA LINIA ---
+        minimapCtx.arc(
+          playerPos.x * MINIMAP_SCALE + MINIMAP_SCALE / 2,
+          playerPos.z * MINIMAP_SCALE + MINIMAP_SCALE / 2,
+          MINIMAP_SCALE * 1.5,
+          0,
+          2 * Math.PI
+        );
+        minimapCtx.fill();
+      }
+
+      // ====================================================================
+      // GŁÓWNA PĘTLA GRY
+      // ====================================================================
+
+      const clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+
+        // Ruch bohatera
+        if (path.length > 0) {
+          const targetNode = path[0];
+          const targetPos = gridToWorld(targetNode.x, targetNode.z);
+
+          const direction = targetPos.clone().sub(hero.position).normalize();
+          const speed = 5 * delta;
+          hero.position.add(direction.multiplyScalar(speed));
+
+          if (hero.position.distanceTo(targetPos) < 0.2) {
+            hero.position.copy(targetPos);
+            path.shift();
+
+            if (path.length === 0) {
+              handleAction(clock);
+            }
+          }
+          updateCameraPosition();
+        }
+
+        // Aktualizacja wrogów
+        gameState.enemies.forEach((enemy) => enemy.update(delta, clock));
+
+        // Aktualizacja UI
+        healthBarFillEl.style.width = `${
+          (gameState.player.health / gameState.player.maxHealth) * 100
+        }%`;
+        woodAmountEl.textContent = gameState.resources.wood;
+        stoneAmountEl.textContent = gameState.resources.stone;
+        goldAmountEl.textContent = gameState.resources.gold;
+
+        drawMinimap();
+
+        renderer.render(scene, camera);
+      }
+
+      // ====================================================================
+      // INICJALIZACJA I LISTENERY
+      // ====================================================================
+
+      function init() {
+        generateWorld();
+        createHero();
+        spawnEnemies();
+
+        window.addEventListener(
+          "resize",
+          () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+          },
+          false
+        );
+
+        renderer.domElement.addEventListener("click", onMouseClick, false);
+        renderer.domElement.addEventListener(
+          "contextmenu",
+          onRightClick,
+          false
+        );
+
+        // Listenery dla przycisków budowy
+        document.querySelectorAll(".build-button").forEach((button) => {
+          button.addEventListener("click", (e) => {
+            if (!button.classList.contains("disabled")) {
+              build(button.dataset.building);
+            }
+            e.stopPropagation();
+          });
+        });
+
+        animate();
+        showActionInfo(
+          "Witaj w grze! Kliknij, by się poruszać. PPM, by budować."
+        );
+      }
+
+      init();
+    </script>
+  </body>
+</html>
