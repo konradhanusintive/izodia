@@ -29,7 +29,6 @@
         pointer-events: none; /* Pozwala na klikanie "przez" UI */
       }
 
-      /* --- Górny Pasek --- */
       #top-bar {
         position: absolute;
         top: 10px;
@@ -73,7 +72,6 @@
         font-weight: bold;
       }
 
-      /* --- Minimapa --- */
       #minimap-container {
         position: absolute;
         bottom: 10px;
@@ -86,8 +84,7 @@
         display: block;
       }
 
-      /* --- Menu Budowy --- */
-      #build-menu {
+      .menu-panel {
         position: absolute;
         bottom: 10px;
         left: 10px;
@@ -101,27 +98,26 @@
         flex-direction: column;
         gap: 5px;
       }
-      .build-button {
+      .menu-button {
         background: #444;
         color: white;
         border: 1px solid #777;
         padding: 8px 12px;
         cursor: pointer;
-        width: 180px;
+        width: 200px;
         text-align: left;
         border-radius: 4px;
       }
-      .build-button:hover {
+      .menu-button:hover {
         background: #5a5a5a;
       }
-      .build-button.disabled {
+      .menu-button.disabled {
         background: #333;
         color: #888;
         cursor: not-allowed;
         border-color: #555;
       }
 
-      /* --- Komunikaty --- */
       #action-info {
         position: absolute;
         bottom: 20px;
@@ -139,7 +135,6 @@
     <div id="game-container"></div>
 
     <div id="ui-container">
-      <!-- Górny pasek z życiem i zasobami -->
       <div id="top-bar">
         <div id="health-bar-container">
           <span>❤️</span>
@@ -154,43 +149,53 @@
         </div>
       </div>
 
-      <!-- Minimapa -->
       <div id="minimap-container">
         <canvas id="minimap"></canvas>
       </div>
 
-      <!-- Menu budowania -->
-      <div id="build-menu">
-        <button class="build-button" data-building="townhall">
+      <div id="build-menu" class="menu-panel">
+        <button class="menu-button" data-building="townhall">
           Ratusz (150🌲 100⛏️)
         </button>
-        <button class="build-button" data-building="barracks">
+        <button class="menu-button" data-building="barracks">
           Koszary (100🌲 50⛏️)
         </button>
-        <button class="build-button" data-building="goldmine">
+        <button class="menu-button" data-building="goldmine">
           Kopalnia Złota (80🌲 120⛏️)
         </button>
-        <button class="build-button" data-building="church">
+        <button class="menu-button" data-building="church">
           Kościół (50🌲 50⛏️ 50💰)
         </button>
-        <button class="build-button" data-building="blacksmith">
+        <button class="menu-button" data-building="blacksmith">
           Kuźnia (75⛏️ 50💰)
         </button>
-        <button class="build-button" data-building="siegeworkshop">
-          Warsztat Oblężniczy (150🌲 100💰)
+        <button class="menu-button" data-building="siegeworkshop">
+          Warsztat Oblęż. (150🌲 100💰)
         </button>
       </div>
 
-      <!-- Informacje o akcjach -->
+      <div id="train-menu" class="menu-panel">
+        <button class="menu-button" data-unit="swordsman">
+          Miecznik (20🌲 10💰)
+        </button>
+        <button class="menu-button" data-unit="shieldbearer">
+          Tarczownik (30🌲 15💰)
+        </button>
+        <button class="menu-button" data-unit="spearman">
+          Włócznik (25🌲 15💰)
+        </button>
+        <button class="menu-button" data-unit="crossbowman">
+          Kusznik (15🌲 25💰)
+        </button>
+      </div>
+
       <div id="action-info"></div>
     </div>
 
-    <!-- Importmap do wczytania Three.js z CDN -->
     <script type="importmap">
       {
         "imports": {
-          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
         }
       }
     </script>
@@ -199,11 +204,10 @@
       import * as THREE from "three";
 
       // ====================================================================
-      // GŁÓWNE ZMIENNE I KONFIGURACJA
+      // KONFIGURACJA I STAŁE
       // ====================================================================
-
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x87ceeb); // Kolor nieba
+      scene.background = new THREE.Color(0x87ceeb);
 
       const TILE_SIZE = 2;
       const MAP_WIDTH = 50;
@@ -223,7 +227,6 @@
         .getElementById("game-container")
         .appendChild(renderer.domElement);
 
-      // Światło
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
       scene.add(ambientLight);
       const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
@@ -237,62 +240,129 @@
       directionalLight.shadow.camera.bottom = -80;
       scene.add(directionalLight);
 
-      // Stan gry
+      const UNIT_STATS = {
+        swordsman: {
+          hp: 100,
+          damage: 12,
+          speed: 3.5,
+          range: 1.5,
+          cost: { wood: 20, stone: 0, gold: 10 },
+          color: 0x0000ff,
+        },
+        shieldbearer: {
+          hp: 150,
+          damage: 8,
+          speed: 3.0,
+          range: 1.5,
+          cost: { wood: 30, stone: 0, gold: 15 },
+          color: 0x4444ff,
+        },
+        spearman: {
+          hp: 90,
+          damage: 15,
+          speed: 4.0,
+          range: 2.5,
+          cost: { wood: 25, stone: 0, gold: 15 },
+          color: 0x00ff00,
+        },
+        crossbowman: {
+          hp: 70,
+          damage: 10,
+          speed: 3.8,
+          range: 8.0,
+          cost: { wood: 15, stone: 0, gold: 25 },
+          color: 0xffff00,
+        },
+      };
+      const ENEMY_UNIT_STATS = {
+        swordsman: {
+          hp: 110,
+          damage: 10,
+          speed: 3.5,
+          range: 1.5,
+          color: 0xff0000,
+        },
+        shieldbearer: {
+          hp: 160,
+          damage: 7,
+          speed: 3.0,
+          range: 1.5,
+          color: 0xff4444,
+        },
+        spearman: {
+          hp: 95,
+          damage: 13,
+          speed: 4.0,
+          range: 2.5,
+          color: 0xff8c00,
+        }, // Poprawiony kolor (był błąd)
+        crossbowman: {
+          hp: 75,
+          damage: 9,
+          speed: 3.8,
+          range: 8.0,
+          color: 0xffaa00,
+        },
+      };
+
       const gameState = {
-        resources: { wood: 200, stone: 150, gold: 0 },
+        resources: { wood: 200, stone: 150, gold: 50 },
         player: {
           health: 100,
           maxHealth: 100,
           damage: 10,
-          attackSpeed: 1.0, // sekundy
+          attackSpeed: 1.0,
           lastAttackTime: 0,
         },
-        enemies: [],
+        playerUnits: [],
+        enemyUnits: [],
         buildings: [],
+        selectedUnits: [],
+        playerBase: null,
+        enemyBase: null,
       };
 
-      // Obiekty gry
       let hero;
-      let path = []; // Ścieżka dla bohatera
-      const worldObjects = {}; // Przechowuje obiekty na mapie (drzewa, skały itp.)
+      let path = [];
+      const worldObjects = {};
       const grid = Array(MAP_WIDTH)
         .fill(null)
-        .map(() => Array(MAP_HEIGHT).fill(0)); // 0: walkable, 1: blocked
+        .map(() => Array(MAP_HEIGHT).fill(0));
 
-      // Elementy UI
       const woodAmountEl = document.getElementById("wood-amount");
       const stoneAmountEl = document.getElementById("stone-amount");
       const goldAmountEl = document.getElementById("gold-amount");
       const healthBarFillEl = document.getElementById("health-bar-fill");
       const buildMenuEl = document.getElementById("build-menu");
+      const trainMenuEl = document.getElementById("train-menu");
       const actionInfoEl = document.getElementById("action-info");
 
-      // Mapa gry (0: trawa, 1: woda, 2: kamień, 3: drzewo, 4: baza wroga, 5: złoto, 6: wioska startowa)
+      // 0: trawa, 1: woda, 2: kamień, 3: drzewo, 4: baza wroga, 5: złoto, 6: wioska startowa, 7: cytadela wroga
       const MAP_GRID = [
         [
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 7,
+          7, 7, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
           1, 1, 1, 1,
         ],
         [
-          1, 4, 4, 4, 1, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 2, 2, 2, 0, 0, 0, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 5, 5,
-          5, 1, 1, 1,
+          1, 4, 4, 4, 1, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
+          0, 7, 1, 5, 5, 5, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1,
         ],
         [
-          1, 4, 0, 4, 1, 3, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 0,
-          5, 1, 1, 1,
+          1, 4, 0, 4, 1, 3, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7,
+          7, 7, 1, 5, 0, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1,
         ],
         [
           1, 4, 4, 4, 1, 3, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 5, 5,
-          5, 1, 1, 1,
+          0, 0, 0, 5, 5, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
+          1, 1, 1, 1,
         ],
         [
           1, 1, 1, 1, 1, 3, 0, 0, 0, 0, 0, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
-          1, 1, 1, 1,
+          0, 0, 0, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 1,
         ],
         [
           1, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -304,65 +374,27 @@
           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
           0, 0, 0, 1,
         ],
-        [
-          1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 3, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
-        [
-          1, 3, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          0, 0, 0, 1,
-        ],
       ];
 
-      // Dopełnienie mapy
+      // --- POPRAWIONA SEKCJA GENEROWANIA MAPY ---
       while (MAP_GRID.length < MAP_HEIGHT) {
-        const row = [1];
+        const row = Array(MAP_WIDTH).fill(0);
+        row[0] = 1;
+        row[MAP_WIDTH - 1] = 1;
+        // Pętla po kolumnach (zmienna `i` jest teraz w poprawnym zasięgu)
         for (let i = 1; i < MAP_WIDTH - 1; i++) {
-          if (
-            MAP_GRID.length > MAP_HEIGHT - 6 &&
-            i > MAP_WIDTH - 25 &&
-            i < MAP_WIDTH - 20
-          ) {
-            row.push(6); // Wioska startowa
+          // Sprawdź, czy to miejsce na wioskę startową gracza
+          if (MAP_GRID.length > MAP_HEIGHT - 10 && i > 5 && i < 15) {
+            row[i] = 6;
           } else {
-            let val = 0; // Trawa
-            if (Math.random() < 0.15) val = 3; // Drzewo
-            if (Math.random() < 0.05) val = 2; // Skała
-            row.push(val);
+            // W przeciwnym wypadku, generuj losowy teren
+            if (Math.random() < 0.15) row[i] = 3; // Drzewo
+            else if (Math.random() < 0.05) row[i] = 2; // Skała
           }
         }
-        row.push(1);
         MAP_GRID.push(row);
       }
-      const lastRow = Array(MAP_WIDTH).fill(1);
-      MAP_GRID.push(lastRow);
+      MAP_GRID[MAP_HEIGHT - 1] = Array(MAP_WIDTH).fill(1);
 
       const buildingCosts = {
         townhall: { wood: 150, stone: 100, gold: 0 },
@@ -372,31 +404,52 @@
         blacksmith: { wood: 0, stone: 75, gold: 50 },
         siegeworkshop: { wood: 150, stone: 0, gold: 100 },
       };
-
       const buildingData = {
-        townhall: { name: "Ratusz", color: 0xaaaaaa },
-        barracks: { name: "Koszary", color: 0x8b4513 },
-        goldmine: { name: "Kopalnia Złota", color: 0xffd700 },
-        church: { name: "Kościół", color: 0xffffff },
-        blacksmith: { name: "Kuźnia", color: 0x404040 },
-        siegeworkshop: { name: "Warsztat Oblężniczy", color: 0x654321 },
+        townhall: {
+          name: "Ratusz",
+          color: 0xaaaaaa,
+          size: new THREE.Vector3(
+            TILE_SIZE * 1.5,
+            TILE_SIZE * 2.5,
+            TILE_SIZE * 1.5
+          ),
+        },
+        barracks: {
+          name: "Koszary",
+          color: 0x8b4513,
+          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 2, TILE_SIZE),
+        },
+        goldmine: {
+          name: "Kopalnia Złota",
+          color: 0xffd700,
+          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 1.5, TILE_SIZE),
+        },
+        church: {
+          name: "Kościół",
+          color: 0xffffff,
+          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 2.2, TILE_SIZE),
+        },
+        blacksmith: {
+          name: "Kuźnia",
+          color: 0x404040,
+          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 1.8, TILE_SIZE),
+        },
+        siegeworkshop: {
+          name: "Warsztat Oblężniczy",
+          color: 0x654321,
+          size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 1.8, TILE_SIZE),
+        },
       };
-
-      // ====================================================================
-      // FUNKCJE POMOCNICZE
-      // ====================================================================
 
       function gridToWorld(x, z) {
         return new THREE.Vector3(x * TILE_SIZE, 0, z * TILE_SIZE);
       }
-
       function worldToGrid(position) {
         return {
           x: Math.round(position.x / TILE_SIZE),
           z: Math.round(position.z / TILE_SIZE),
         };
       }
-
       function showActionInfo(text) {
         actionInfoEl.textContent = text;
         actionInfoEl.style.display = "block";
@@ -405,9 +458,189 @@
         }, 2000);
       }
 
-      // ====================================================================
-      // TWORZENIE ŚWIATA
-      // ====================================================================
+      class Unit {
+        constructor(stats, position, isEnemy = false) {
+          this.stats = stats;
+          this.health = stats.hp;
+          this.isEnemy = isEnemy;
+          this.state = "MOVING_TO_GOAL";
+          this.path = [];
+          this.target = null;
+          this.lastAttackTime = 0;
+          this.sightRange = 12 * TILE_SIZE;
+
+          this.mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 1.5, 1),
+            new THREE.MeshLambertMaterial({ color: stats.color })
+          );
+          this.mesh.position.copy(position);
+          this.mesh.position.y = 0.75;
+          this.mesh.castShadow = true;
+          this.mesh.userData = {
+            type: isEnemy ? "enemyUnit" : "playerUnit",
+            parent: this,
+          };
+          scene.add(this.mesh);
+
+          const healthBarCont = new THREE.Group();
+          const barGeo = new THREE.PlaneGeometry(1.5, 0.2);
+          const backMat = new THREE.MeshBasicMaterial({ color: 0x555555 });
+          const frontMat = new THREE.MeshBasicMaterial({
+            color: isEnemy ? 0xff0000 : 0x00ff00,
+          });
+          this.healthBar = new THREE.Mesh(barGeo, frontMat);
+          healthBarCont.add(new THREE.Mesh(barGeo, backMat));
+          healthBarCont.add(this.healthBar);
+          this.healthBar.position.z = 0.01;
+          healthBarCont.position.y = 2.2;
+          this.mesh.add(healthBarCont);
+          this.healthBarContainer = healthBarCont;
+
+          if (!isEnemy) {
+            const ringGeo = new THREE.RingGeometry(0.7, 0.8, 32);
+            const ringMat = new THREE.MeshBasicMaterial({
+              color: 0x00ff00,
+              side: THREE.DoubleSide,
+            });
+            this.selectionCircle = new THREE.Mesh(ringGeo, ringMat);
+            this.selectionCircle.rotation.x = -Math.PI / 2;
+            this.selectionCircle.position.y = -0.7;
+            this.selectionCircle.visible = false;
+            this.mesh.add(this.selectionCircle);
+          }
+        }
+
+        update(delta, clock, potentialTargets, goal) {
+          this.healthBarContainer.lookAt(camera.position);
+
+          if (this.state !== "ATTACKING") {
+            this.findTarget(potentialTargets);
+          }
+
+          if (
+            this.target &&
+            (this.target.health <= 0 || !this.target.mesh.parent)
+          ) {
+            this.target = null;
+            this.state = "MOVING_TO_GOAL";
+          }
+
+          if (this.target) {
+            const distanceToTarget = this.mesh.position.distanceTo(
+              this.target.mesh.position
+            );
+            if (distanceToTarget <= this.stats.range * TILE_SIZE) {
+              this.state = "ATTACKING";
+              this.path = [];
+            } else {
+              this.state = "ENGAGING";
+            }
+          } else {
+            this.state = "MOVING_TO_GOAL";
+          }
+
+          switch (this.state) {
+            case "MOVING_TO_GOAL":
+              if (this.path.length === 0 && goal) {
+                this.path = findPath(
+                  worldToGrid(this.mesh.position),
+                  worldToGrid(goal.position)
+                );
+              }
+              break;
+            case "ENGAGING":
+              if (
+                this.target &&
+                (this.path.length === 0 || Math.random() < 0.05)
+              ) {
+                this.path = findPath(
+                  worldToGrid(this.mesh.position),
+                  worldToGrid(this.target.mesh.position)
+                );
+              }
+              break;
+            case "ATTACKING":
+              if (
+                this.target &&
+                clock.getElapsedTime() - this.lastAttackTime >
+                  1 / (this.stats.speed / 3)
+              ) {
+                this.target.takeDamage(this.stats.damage);
+                this.lastAttackTime = clock.getElapsedTime();
+              }
+              break;
+          }
+
+          this.moveAlongPath(delta);
+        }
+
+        findTarget(potentialTargets) {
+          let closestTarget = null;
+          let minDistance = this.sightRange;
+          potentialTargets.forEach((t) => {
+            if (t && t.health > 0) {
+              const distance = this.mesh.position.distanceTo(t.mesh.position);
+              if (distance < minDistance) {
+                minDistance = distance;
+                closestTarget = t;
+              }
+            }
+          });
+          if (closestTarget) {
+            this.target = closestTarget;
+          }
+        }
+
+        moveAlongPath(delta) {
+          if (this.path && this.path.length > 0) {
+            const targetNode = this.path[0];
+            const targetPos = gridToWorld(targetNode.x, targetNode.z);
+            targetPos.y = this.mesh.position.y;
+            const direction = targetPos
+              .clone()
+              .sub(this.mesh.position)
+              .normalize();
+            const speed = this.stats.speed * delta;
+            this.mesh.position.add(direction.multiplyScalar(speed));
+            if (this.mesh.position.distanceTo(targetPos) < 0.5) {
+              this.path.shift();
+            }
+          }
+        }
+
+        takeDamage(amount) {
+          this.health -= amount;
+          if (this.health <= 0) {
+            this.health = 0;
+            this.die();
+          }
+          this.healthBar.scale.x = this.health / this.stats.hp;
+        }
+
+        die() {
+          scene.remove(this.mesh);
+          const list = this.isEnemy
+            ? gameState.enemyUnits
+            : gameState.playerUnits;
+          const index = list.indexOf(this);
+          if (index > -1) list.splice(index, 1);
+        }
+
+        setSelection(selected) {
+          if (this.selectionCircle) this.selectionCircle.visible = selected;
+        }
+      }
+
+      class PlayerUnit extends Unit {
+        constructor(stats, position) {
+          super(stats, position, false);
+        }
+      }
+      class EnemyUnit extends Unit {
+        constructor(stats, position) {
+          super(stats, position, true);
+        }
+      }
 
       function generateWorld() {
         const materials = {
@@ -423,6 +656,7 @@
           enemyBase: new THREE.MeshLambertMaterial({ color: 0xc0392b }),
           gold: new THREE.MeshLambertMaterial({ color: 0xf1c40f }),
           startVillage: new THREE.MeshLambertMaterial({ color: 0xbdc3c7 }),
+          enemyCitadel: new THREE.MeshLambertMaterial({ color: 0x330033 }),
         };
 
         const groundGeometry = new THREE.BoxGeometry(
@@ -439,17 +673,16 @@
             let groundTile;
 
             switch (tileType) {
-              case 1: // Woda
+              case 1:
                 groundTile = new THREE.Mesh(groundGeometry, materials.water);
-                pos.y -= TILE_SIZE / 2; // Woda jest niżej
-                grid[x][z] = 1; // Zablokowane
+                pos.y -= TILE_SIZE / 2;
+                grid[x][z] = 1;
                 break;
-              case 2: // Skała
-              case 5: // Złoto
+              case 2:
+              case 5:
                 groundTile = new THREE.Mesh(groundGeometry, materials.grass);
                 scene.add(groundTile);
                 groundTile.position.copy(pos);
-
                 const resourceGeo = new THREE.BoxGeometry(
                   TILE_SIZE * 0.8,
                   TILE_SIZE * 1.5,
@@ -469,12 +702,11 @@
                 scene.add(resourceMesh);
                 worldObjects[`${x},${z}`] = resourceMesh;
                 grid[x][z] = 1;
-                continue; // Przejdź do następnej pętli
-              case 3: // Drzewo
+                continue;
+              case 3:
                 groundTile = new THREE.Mesh(groundGeometry, materials.grass);
                 scene.add(groundTile);
                 groundTile.position.copy(pos);
-
                 const trunk = new THREE.Mesh(
                   new THREE.CylinderGeometry(0.3, 0.4, TILE_SIZE * 1.5, 8),
                   materials.treeTrunk
@@ -487,7 +719,6 @@
                 leaves.position.set(pos.x, TILE_SIZE * 2, pos.z);
                 trunk.castShadow = true;
                 leaves.castShadow = true;
-
                 const tree = new THREE.Group();
                 tree.add(trunk);
                 tree.add(leaves);
@@ -496,20 +727,27 @@
                 worldObjects[`${x},${z}`] = tree;
                 grid[x][z] = 1;
                 continue;
-              case 4: // Baza wroga
+              case 4:
                 groundTile = new THREE.Mesh(
                   groundGeometry,
                   materials.enemyBase
                 );
                 grid[x][z] = 1;
                 break;
-              case 6: // Wioska
+              case 6:
                 groundTile = new THREE.Mesh(
                   groundGeometry,
                   materials.startVillage
                 );
                 break;
-              default: // Trawa
+              case 7:
+                groundTile = new THREE.Mesh(
+                  groundGeometry,
+                  materials.enemyCitadel
+                );
+                grid[x][z] = 1;
+                break;
+              default:
                 groundTile = new THREE.Mesh(groundGeometry, materials.grass);
                 break;
             }
@@ -519,11 +757,33 @@
             scene.add(groundTile);
           }
         }
-      }
 
-      // ====================================================================
-      // BOHATER
-      // ====================================================================
+        const citadelGeo = new THREE.BoxGeometry(
+          TILE_SIZE * 3,
+          TILE_SIZE * 4,
+          TILE_SIZE * 3
+        );
+        const citadelMat = new THREE.MeshLambertMaterial({ color: 0x550055 });
+        gameState.enemyBase = new THREE.Mesh(citadelGeo, citadelMat);
+        gameState.enemyBase.position.copy(gridToWorld(23, 2));
+        gameState.enemyBase.position.y = TILE_SIZE * 2;
+        gameState.enemyBase.castShadow = true;
+        gameState.enemyBase.userData = {
+          type: "enemy_base",
+          parent: {
+            health: 1000,
+            mesh: gameState.enemyBase,
+            takeDamage: function (dmg) {
+              this.health -= dmg;
+              if (this.health <= 0) {
+                showActionInfo("ZWYCIĘSTWO!");
+                scene.remove(this.mesh);
+              }
+            },
+          },
+        };
+        scene.add(gameState.enemyBase);
+      }
 
       function createHero() {
         const heroGroup = new THREE.Group();
@@ -532,20 +792,15 @@
         const body = new THREE.Mesh(bodyGeo, bodyMat);
         body.castShadow = true;
         body.position.y = 1;
-
         const headGeo = new THREE.SphereGeometry(0.4, 16, 16);
         const headMat = new THREE.MeshLambertMaterial({ color: 0xf1c40f });
         const head = new THREE.Mesh(headGeo, headMat);
         head.position.y = 2.0;
-
         heroGroup.add(body);
         heroGroup.add(head);
-
-        heroGroup.userData = { type: "player" };
-
+        heroGroup.userData = { type: "player", parent: gameState.player };
         let startPos = { x: 0, z: 0 };
-        // Znajdź pozycję startową
-        for (let z = 0; z < MAP_HEIGHT; z++) {
+        for (let z = MAP_HEIGHT - 1; z > 0; z--) {
           for (let x = 0; x < MAP_WIDTH; x++) {
             if (MAP_GRID[z][x] === 6) {
               startPos = { x, z };
@@ -554,192 +809,39 @@
           }
           if (startPos.x !== 0) break;
         }
-
         heroGroup.position.copy(gridToWorld(startPos.x, startPos.z));
         hero = heroGroup;
         scene.add(hero);
-
-        // Inicjalizacja kamery
+        gameState.player.mesh = hero;
+        gameState.player.takeDamage = function (dmg) {
+          this.health -= dmg;
+          if (this.health <= 0) {
+            this.health = 0;
+            showActionInfo("Bohater pokonany!");
+            hero.visible = false;
+          }
+        };
         updateCameraPosition();
       }
-
       function updateCameraPosition() {
         const offset = new THREE.Vector3(15, 20, 15);
         camera.position.copy(hero.position).add(offset);
         camera.lookAt(hero.position);
       }
-
-      // ====================================================================
-      // WROGOWIE I AI
-      // ====================================================================
-      class Enemy {
-        constructor(x, z, patrolPath) {
-          this.health = 50;
-          this.maxHealth = 50;
-          this.damage = 5;
-          this.attackSpeed = 1.5;
-          this.lastAttackTime = 0;
-          this.attackRange = 2 * TILE_SIZE;
-          this.sightRange = 10 * TILE_SIZE;
-          this.patrolPath = patrolPath;
-          this.patrolIndex = 0;
-          this.state = "patrol"; // patrol, chase, attack
-
-          const geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-          const mat = new THREE.MeshLambertMaterial({ color: 0xe74c3c });
-          this.mesh = new THREE.Mesh(geo, mat);
-          this.mesh.castShadow = true;
-          this.mesh.position.copy(gridToWorld(x, z));
-          this.mesh.position.y = 0.6;
-          this.mesh.userData = { type: "enemy", parent: this };
-          scene.add(this.mesh);
-
-          this.path = [];
-
-          const healthBarGeo = new THREE.PlaneGeometry(1.5, 0.2);
-          const healthBarMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-          this.healthBar = new THREE.Mesh(healthBarGeo, healthBarMat);
-          this.healthBar.position.y = 2.0;
-          this.mesh.add(this.healthBar);
-        }
-
-        update(delta, clock) {
-          const playerPos = hero.position;
-          const enemyPos = this.mesh.position;
-          const distanceToPlayer = playerPos.distanceTo(enemyPos);
-
-          // Update stanu AI
-          if (distanceToPlayer <= this.attackRange) {
-            this.state = "attack";
-          } else if (distanceToPlayer <= this.sightRange) {
-            this.state = "chase";
-          } else {
-            this.state = "patrol";
-          }
-
-          // Logika stanów
-          switch (this.state) {
-            case "patrol":
-              if (this.path.length === 0) {
-                const targetPatrolPoint = this.patrolPath[this.patrolIndex];
-                const currentGridPos = worldToGrid(this.mesh.position);
-                if (
-                  currentGridPos.x === targetPatrolPoint.x &&
-                  currentGridPos.z === targetPatrolPoint.z
-                ) {
-                  this.patrolIndex =
-                    (this.patrolIndex + 1) % this.patrolPath.length;
-                } else {
-                  this.path = findPath(currentGridPos, targetPatrolPoint);
-                }
-              }
-              break;
-            case "chase":
-              // Aktualizuj ścieżkę do gracza co jakiś czas
-              if (Math.random() < 0.1) {
-                this.path = findPath(
-                  worldToGrid(this.mesh.position),
-                  worldToGrid(hero.position)
-                );
-              }
-              break;
-            case "attack":
-              this.path = []; // Zatrzymaj się, by atakować
-              if (
-                clock.getElapsedTime() - this.lastAttackTime >
-                this.attackSpeed
-              ) {
-                gameState.player.health -= this.damage;
-                this.lastAttackTime = clock.getElapsedTime();
-                showActionInfo(`Otrzymano ${this.damage} obrażeń!`);
-                if (gameState.player.health <= 0) {
-                  showActionInfo("Zostałeś pokonany!");
-                  gameState.player.health = 0;
-                  // Tu można dodać logikę końca gry
-                }
-              }
-              break;
-          }
-
-          this.moveAlongPath(delta);
-          this.healthBar.lookAt(camera.position);
-        }
-
-        moveAlongPath(delta) {
-          if (this.path && this.path.length > 0) {
-            const targetNode = this.path[0];
-            const targetPos = gridToWorld(targetNode.x, targetNode.z);
-            targetPos.y = this.mesh.position.y; // Nie zmieniaj wysokości
-
-            const direction = targetPos
-              .clone()
-              .sub(this.mesh.position)
-              .normalize();
-            const speed = 3 * delta;
-            this.mesh.position.add(direction.multiplyScalar(speed));
-
-            if (this.mesh.position.distanceTo(targetPos) < 0.2) {
-              this.mesh.position.copy(targetPos);
-              this.path.shift();
-            }
-          }
-        }
-
-        takeDamage(amount) {
-          this.health -= amount;
-          if (this.health <= 0) {
-            this.health = 0;
-            this.die();
-          }
-          this.healthBar.scale.x = this.health / this.maxHealth;
-        }
-
-        die() {
-          scene.remove(this.mesh);
-          const index = gameState.enemies.indexOf(this);
-          if (index > -1) {
-            gameState.enemies.splice(index, 1);
-          }
-        }
-      }
-
-      function spawnEnemies() {
-        const enemy = new Enemy(4, 2, [
-          { x: 2, z: 2 },
-          { x: 2, z: 4 },
-          { x: 4, z: 4 },
-        ]);
-        gameState.enemies.push(enemy);
-        const enemy2 = new Enemy(3, 3, [
-          { x: 2, z: 3 },
-          { x: 4, z: 3 },
-        ]);
-        gameState.enemies.push(enemy2);
-      }
-
-      // ====================================================================
-      // RUCH I PATHFINDING (A*)
-      // ====================================================================
-
       function findPath(start, end) {
         const openSet = [];
         const closedSet = [];
         const cameFrom = {};
-
-        const gScore = {}; // koszt od startu
-        const fScore = {}; // gScore + heurystyka
-
+        const gScore = {};
+        const fScore = {};
         function heuristic(a, b) {
           return Math.abs(a.x - b.x) + Math.abs(a.z - b.z);
         }
-
         const startKey = `${start.x},${start.z}`;
         gScore[startKey] = 0;
         fScore[startKey] = heuristic(start, end);
         openSet.push({ x: start.x, z: start.z });
-
         while (openSet.length > 0) {
-          // Znajdź węzeł z najniższym fScore
           let lowestIndex = 0;
           for (let i = 1; i < openSet.length; i++) {
             if (
@@ -750,9 +852,7 @@
             }
           }
           const current = openSet[lowestIndex];
-
           if (current.x === end.x && current.z === end.z) {
-            // Rekonstrukcja ścieżki
             const totalPath = [current];
             let temp = current;
             while (cameFrom[`${temp.x},${temp.z}`]) {
@@ -761,19 +861,15 @@
             }
             return totalPath;
           }
-
           openSet.splice(lowestIndex, 1);
           closedSet.push(current);
-
           const neighbors = [
             { x: current.x + 1, z: current.z },
             { x: current.x - 1, z: current.z },
             { x: current.x, z: current.z + 1 },
             { x: current.x, z: current.z - 1 },
           ];
-
           for (const neighbor of neighbors) {
-            // Sprawdź granice mapy i czy jest przejezdne
             if (
               neighbor.x < 0 ||
               neighbor.x >= MAP_WIDTH ||
@@ -783,16 +879,13 @@
             ) {
               continue;
             }
-
             if (
               closedSet.find((c) => c.x === neighbor.x && c.z === neighbor.z)
             ) {
               continue;
             }
-
             const tentativeGScore = gScore[`${current.x},${current.z}`] + 1;
             const neighborKey = `${neighbor.x},${neighbor.z}`;
-
             if (
               !openSet.find((o) => o.x === neighbor.x && o.z === neighbor.z)
             ) {
@@ -800,37 +893,28 @@
             } else if (tentativeGScore >= gScore[neighborKey]) {
               continue;
             }
-
             cameFrom[neighborKey] = current;
             gScore[neighborKey] = tentativeGScore;
             fScore[neighborKey] =
               gScore[neighborKey] + heuristic(neighbor, end);
           }
         }
-        return []; // Brak ścieżki
+        return [];
       }
-
-      // ====================================================================
-      // INTERAKCJE I AKCJE
-      // ====================================================================
 
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
-      let currentAction = null; // { type, target, targetGridPos }
+      let currentAction = null;
 
       function onMouseClick(event) {
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
         raycaster.setFromCamera(mouse, camera);
-
         const intersects = raycaster.intersectObjects(scene.children, true);
-
-        buildMenuEl.style.display = "none"; // Zamknij menu budowy przy kliknięciu
-
+        buildMenuEl.style.display = "none";
+        trainMenuEl.style.display = "none";
         if (intersects.length > 0) {
           let clickedObject = intersects[0].object;
-
-          // Szukaj nadrzędnego obiektu, jeśli kliknięto część grupy
           while (
             clickedObject.parent &&
             clickedObject.parent.type !== "Scene"
@@ -840,53 +924,44 @@
           }
           const data = clickedObject.userData;
 
+          if (data.type === "playerUnit") {
+            gameState.selectedUnits.forEach((u) => u.setSelection(false));
+            gameState.selectedUnits = [data.parent];
+            data.parent.setSelection(true);
+            path = [];
+            return;
+          }
+          if (data.type === "building" && data.building === "barracks") {
+            updateTrainMenu();
+            trainMenuEl.style.display = "flex";
+            trainMenuEl.dataset.buildingX = data.gridX;
+            trainMenuEl.dataset.buildingZ = data.gridZ;
+            return;
+          }
+
+          gameState.selectedUnits.forEach((u) => u.setSelection(false));
+          gameState.selectedUnits = [];
           const currentGridPos = worldToGrid(hero.position);
           let targetGridPos;
-
-          if (data.type) {
-            // Kliknięcie na obiekt interaktywny
-            targetGridPos =
-              data.gridX !== undefined
-                ? { x: data.gridX, z: data.gridZ }
-                : worldToGrid(clickedObject.position);
-
-            if (
-              data.type === "wood" ||
-              data.type === "stone" ||
-              data.type === "gold"
-            ) {
-              currentAction = {
-                type: "gather",
-                target: clickedObject,
-                targetGridPos,
-              };
-            } else if (data.type === "enemy") {
-              currentAction = {
-                type: "attack",
-                target: data.parent,
-                targetGridPos,
-              };
-            } else if (data.type === "building") {
-              handleBuildingClick(data.building);
-              currentAction = null;
-              path = [];
-              return;
-            }
+          if (
+            data.type === "wood" ||
+            data.type === "stone" ||
+            data.type === "gold"
+          ) {
+            targetGridPos = { x: data.gridX, z: data.gridZ };
+            currentAction = {
+              type: "gather",
+              target: clickedObject,
+              targetGridPos,
+            };
           } else {
-            // Kliknięcie na ziemię
             targetGridPos = worldToGrid(intersects[0].point);
             currentAction = { type: "move", targetGridPos };
           }
 
-          // Wygeneruj ścieżkę do celu lub sąsiedniego pola
           if (currentAction) {
             path = findPath(currentGridPos, targetGridPos);
-            // Jeśli cel jest zablokowany, znajdź ścieżkę do najbliższego wolnego pola
-            if (
-              path.length === 0 &&
-              (currentAction.type === "gather" ||
-                currentAction.type === "attack")
-            ) {
+            if (path.length === 0 && currentAction.type === "gather") {
               const neighbors = [
                 { x: targetGridPos.x + 1, z: targetGridPos.z },
                 { x: targetGridPos.x - 1, z: targetGridPos.z },
@@ -912,95 +987,82 @@
 
       function onRightClick(event) {
         event.preventDefault();
-        const currentGridPos = worldToGrid(hero.position);
-
-        if (grid[currentGridPos.x][currentGridPos.z] === 0) {
-          updateBuildMenu();
-          buildMenuEl.style.display = "flex";
-          // Zapamiętaj pozycję do budowy
-          buildMenuEl.dataset.gridX = currentGridPos.x;
-          buildMenuEl.dataset.gridZ = currentGridPos.z;
-        } else {
-          showActionInfo("Nie można budować na tym polu.");
+        if (gameState.selectedUnits.length === 0) return;
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        if (intersects.length > 0) {
+          let clickedObject = intersects[0].object;
+          while (
+            clickedObject.parent &&
+            clickedObject.parent.type !== "Scene"
+          ) {
+            if (clickedObject.userData.type) break;
+            clickedObject = clickedObject.parent;
+          }
+          const data = clickedObject.userData;
+          const targetPos = worldToGrid(intersects[0].point);
+          gameState.selectedUnits.forEach((unit) => {
+            if (
+              data.parent &&
+              (data.type === "enemyUnit" || data.type === "enemy_base")
+            ) {
+              unit.target = data.parent;
+            } else {
+              unit.target = null;
+              unit.path = findPath(worldToGrid(unit.mesh.position), targetPos);
+            }
+          });
         }
       }
 
-      function handleAction(clock) {
-        if (!currentAction || path.length > 0) return; // Wykonaj akcję dopiero po dojściu do celu
+      function onKeyPress(event) {
+        if (event.key.toLowerCase() === "b") {
+          const currentGridPos = worldToGrid(hero.position);
+          if (grid[currentGridPos.x][currentGridPos.z] === 0) {
+            updateBuildMenu();
+            buildMenuEl.style.display = "flex";
+            buildMenuEl.dataset.gridX = currentGridPos.x;
+            buildMenuEl.dataset.gridZ = currentGridPos.z;
+          } else {
+            showActionInfo("Nie można tu budować.");
+          }
+        }
+      }
 
+      function handleAction() {
+        if (!currentAction || path.length > 0) return;
         const { type, target, targetGridPos } = currentAction;
-
-        switch (type) {
-          case "gather":
-            const resourceType = target.userData.type;
-            let amount = 0;
-            if (resourceType === "wood") amount = 10;
-            if (resourceType === "stone") amount = 5;
-            if (resourceType === "gold") amount = 3;
-
-            gameState.resources[resourceType] += amount;
-            showActionInfo(`Zebrano ${amount} ${resourceType}!`);
-
-            scene.remove(target);
-            delete worldObjects[`${targetGridPos.x},${targetGridPos.z}`];
-            grid[targetGridPos.x][targetGridPos.z] = 0; // Pole staje się przejezdne
-            break;
-          case "attack":
-            if (
-              clock.getElapsedTime() - gameState.player.lastAttackTime >
-              gameState.player.attackSpeed
-            ) {
-              target.takeDamage(gameState.player.damage);
-              gameState.player.lastAttackTime = clock.getElapsedTime();
-
-              if (target.health <= 0) {
-                showActionInfo("Wróg pokonany!");
-                currentAction = null; // Zakończ atakowanie
-              }
-            }
-            // Jeśli wróg uciekł, przestań go atakować
-            if (
-              hero.position.distanceTo(target.mesh.position) >
-              3 * TILE_SIZE
-            ) {
-              currentAction = null;
-            }
-            break;
-        }
-
-        // Zresetuj akcję po jednorazowym wykonaniu (poza atakiem, który jest ciągły)
         if (type === "gather") {
-          currentAction = null;
+          const resourceType = target.userData.type;
+          let amount = 0;
+          if (resourceType === "wood") amount = 10;
+          if (resourceType === "stone") amount = 5;
+          if (resourceType === "gold") amount = 3;
+          gameState.resources[resourceType] += amount;
+          showActionInfo(`Zebrano ${amount} ${resourceType}!`);
+          scene.remove(target);
+          delete worldObjects[`${targetGridPos.x},${targetGridPos.z}`];
+          grid[targetGridPos.x][targetGridPos.z] = 0;
         }
+        currentAction = null;
       }
-
-      // ====================================================================
-      // BUDOWANIE
-      // ====================================================================
 
       function updateBuildMenu() {
-        const buttons = buildMenuEl.querySelectorAll(".build-button");
-        buttons.forEach((button) => {
-          const buildingType = button.dataset.building;
-          const cost = buildingCosts[buildingType];
+        buildMenuEl.querySelectorAll(".menu-button").forEach((button) => {
+          const cost = buildingCosts[button.dataset.building];
           const canAfford =
             gameState.resources.wood >= cost.wood &&
             gameState.resources.stone >= cost.stone &&
             gameState.resources.gold >= cost.gold;
-          if (canAfford) {
-            button.classList.remove("disabled");
-          } else {
-            button.classList.add("disabled");
-          }
+          button.classList.toggle("disabled", !canAfford);
         });
       }
-
       function build(type) {
-        const gridX = parseInt(buildMenuEl.dataset.gridX);
-        const gridZ = parseInt(buildMenuEl.dataset.gridZ);
-
+        const gridX = parseInt(buildMenuEl.dataset.gridX),
+          gridZ = parseInt(buildMenuEl.dataset.gridZ);
         if (isNaN(gridX) || isNaN(gridZ)) return;
-
         const cost = buildingCosts[type];
         if (
           gameState.resources.wood >= cost.wood &&
@@ -1010,87 +1072,73 @@
           gameState.resources.wood -= cost.wood;
           gameState.resources.stone -= cost.stone;
           gameState.resources.gold -= cost.gold;
-
           const data = buildingData[type];
-          const buildingGeo = new THREE.BoxGeometry(
-            TILE_SIZE,
-            TILE_SIZE * 2,
-            TILE_SIZE
+          const buildingMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(data.size.x, data.size.y, data.size.z),
+            new THREE.MeshLambertMaterial({ color: data.color })
           );
-          const buildingMat = new THREE.MeshLambertMaterial({
-            color: data.color,
-          });
-          const buildingMesh = new THREE.Mesh(buildingGeo, buildingMat);
-
           const pos = gridToWorld(gridX, gridZ);
-          pos.y = TILE_SIZE / 2;
+          pos.y = data.size.y / 2 - TILE_SIZE / 2;
           buildingMesh.position.copy(pos);
           buildingMesh.castShadow = true;
-          buildingMesh.receiveShadow = true;
           buildingMesh.userData = {
             type: "building",
             building: type,
             gridX,
             gridZ,
+            parent: {
+              health: 500,
+              mesh: buildingMesh,
+              takeDamage: function (dmg) {
+                this.health -= dmg;
+                if (this.health <= 0) {
+                  showActionInfo("Budynek zniszczony!");
+                  scene.remove(this.mesh);
+                  grid[gridX][gridZ] = 0;
+                }
+              },
+            },
           };
-
           scene.add(buildingMesh);
-          grid[gridX][gridZ] = 1; // Zablokuj pole
+          grid[gridX][gridZ] = 1;
           gameState.buildings.push(buildingMesh);
           showActionInfo(`Zbudowano: ${data.name}`);
+          if (type === "townhall" && !gameState.playerBase) {
+            gameState.playerBase = buildingMesh;
+          }
         } else {
           showActionInfo("Za mało zasobów!");
         }
         buildMenuEl.style.display = "none";
       }
 
-      function handleBuildingClick(buildingType) {
-        let unitGeo = new THREE.BoxGeometry(0.8, 0.8, 0.8);
-        let unitMat;
-
-        switch (buildingType) {
-          case "barracks":
-            unitMat = new THREE.MeshLambertMaterial({ color: 0x0000ff }); // Niebieski żołnierz
-            showActionInfo("Wytrenowano Żołnierza!");
-            break;
-          case "church":
-            unitMat = new THREE.MeshLambertMaterial({ color: 0xffffff }); // Biały kapłan
-            showActionInfo("Wytrenowano Kapłana!");
-            // Ulecz bohatera
-            gameState.player.health = Math.min(
-              gameState.player.maxHealth,
-              gameState.player.health + 20
-            );
-            break;
-          case "siegeworkshop":
-            unitGeo = new THREE.BoxGeometry(1.5, 1, 2);
-            unitMat = new THREE.MeshLambertMaterial({ color: 0x5d4037 }); // Brązowa machina
-            showActionInfo("Zbudowano Machinę oblężniczą!");
-            break;
-          case "blacksmith":
-            showActionInfo("Ulepszono broń! (+2 obrażeń)");
-            gameState.player.damage += 2;
-            return; // Nic nie tworzymy
-          case "townhall":
-            showActionInfo("Ratusz - centrum dowodzenia.");
-            return;
-          default:
-            return;
-        }
-
-        const building = gameState.buildings.find(
-          (b) => b.userData.building === buildingType
-        );
-        if (building) {
-          const unit = new THREE.Mesh(unitGeo, unitMat);
-          unit.position.copy(building.position);
-          // Znajdź wolne miejsce obok budynku
-          const { gridX, gridZ } = building.userData;
+      function updateTrainMenu() {
+        trainMenuEl.querySelectorAll(".menu-button").forEach((button) => {
+          const cost = UNIT_STATS[button.dataset.unit].cost;
+          const canAfford =
+            gameState.resources.wood >= cost.wood &&
+            gameState.resources.stone >= cost.stone &&
+            gameState.resources.gold >= cost.gold;
+          button.classList.toggle("disabled", !canAfford);
+        });
+      }
+      function trainUnit(type) {
+        const cost = UNIT_STATS[type].cost;
+        if (
+          gameState.resources.wood >= cost.wood &&
+          gameState.resources.stone >= cost.stone &&
+          gameState.resources.gold >= cost.gold
+        ) {
+          gameState.resources.wood -= cost.wood;
+          gameState.resources.stone -= cost.stone;
+          gameState.resources.gold -= cost.gold;
+          const buildingX = parseInt(trainMenuEl.dataset.buildingX);
+          const buildingZ = parseInt(trainMenuEl.dataset.buildingZ);
           const spawnSpots = [
-            { x: gridX + 1, z: gridZ },
-            { x: gridX - 1, z: gridZ },
-            { x: gridX, z: gridZ + 1 },
-            { x: gridX, z: gridZ - 1 },
+            { x: buildingX + 1, z: buildingZ },
+            { x: buildingX - 1, z: buildingZ },
+            { x: buildingX, z: buildingZ + 1 },
+            { x: buildingX, z: buildingZ - 1 },
           ];
           for (const spot of spawnSpots) {
             if (
@@ -1100,19 +1148,40 @@
               spot.z < MAP_HEIGHT &&
               grid[spot.x][spot.z] === 0
             ) {
-              unit.position.copy(gridToWorld(spot.x, spot.z));
-              unit.position.y = 0.4;
-              scene.add(unit);
+              const unit = new PlayerUnit(
+                UNIT_STATS[type],
+                gridToWorld(spot.x, spot.z)
+              );
+              gameState.playerUnits.push(unit);
+              showActionInfo(`Wytrenowano jednostkę: ${type}`);
               return;
             }
           }
           showActionInfo("Brak miejsca na stworzenie jednostki!");
+        } else {
+          showActionInfo("Za mało zasobów!");
         }
       }
 
-      // ====================================================================
-      // MINIMAPA
-      // ====================================================================
+      const enemySpawner = {
+        timer: 0,
+        spawnInterval: 15,
+        update: (delta) => {
+          enemySpawner.timer += delta;
+          if (enemySpawner.timer > enemySpawner.spawnInterval) {
+            enemySpawner.timer = 0;
+            const unitTypes = Object.keys(ENEMY_UNIT_STATS);
+            const type =
+              unitTypes[Math.floor(Math.random() * unitTypes.length)];
+            const unit = new EnemyUnit(
+              ENEMY_UNIT_STATS[type],
+              gridToWorld(23, 5)
+            );
+            gameState.enemyUnits.push(unit);
+            showActionInfo("Wróg stworzył nową jednostkę!");
+          }
+        },
+      };
 
       const minimapCanvas = document.getElementById("minimap");
       const minimapCtx = minimapCanvas.getContext("2d");
@@ -1122,31 +1191,32 @@
 
       function drawMinimap() {
         minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-
-        // Tło
         for (let z = 0; z < MAP_HEIGHT; z++) {
           for (let x = 0; x < MAP_WIDTH; x++) {
+            let color = "#000";
             switch (MAP_GRID[z][x]) {
               case 0:
               case 6:
-                minimapCtx.fillStyle = "#6ab04c";
-                break; // grass
+                color = "#6ab04c";
+                break;
               case 1:
-                minimapCtx.fillStyle = "#48dbfb";
-                break; // water
+                color = "#48dbfb";
+                break;
               case 2:
               case 5:
-                minimapCtx.fillStyle = "#7f8c8d";
-                break; // rock/gold
+                color = "#7f8c8d";
+                break;
               case 3:
-                minimapCtx.fillStyle = "#27ae60";
-                break; // tree
+                color = "#27ae60";
+                break;
               case 4:
-                minimapCtx.fillStyle = "#c0392b";
-                break; // enemy base
-              default:
-                minimapCtx.fillStyle = "#000";
+                color = "#c0392b";
+                break;
+              case 7:
+                color = "#550055";
+                break;
             }
+            minimapCtx.fillStyle = color;
             minimapCtx.fillRect(
               x * MINIMAP_SCALE,
               z * MINIMAP_SCALE,
@@ -1155,8 +1225,6 @@
             );
           }
         }
-
-        // Budynki gracza
         minimapCtx.fillStyle = "#ffffff";
         gameState.buildings.forEach((b) => {
           const { gridX, gridZ } = b.userData;
@@ -1167,71 +1235,83 @@
             MINIMAP_SCALE
           );
         });
-
-        // Wrogowie
         minimapCtx.fillStyle = "red";
-        gameState.enemies.forEach((enemy) => {
-          const pos = worldToGrid(enemy.mesh.position);
+        gameState.enemyUnits.forEach((u) => {
+          const pos = worldToGrid(u.mesh.position);
           minimapCtx.beginPath();
           minimapCtx.arc(
-            pos.x * MINIMAP_SCALE + MINIMAP_SCALE / 2,
-            pos.z * MINIMAP_SCALE + MINIMAP_SCALE / 2,
-            MINIMAP_SCALE,
+            pos.x * MINIMAP_SCALE + 2,
+            pos.z * MINIMAP_SCALE + 2,
+            MINIMAP_SCALE / 2,
             0,
-            2 * Math.PI
+            7
           );
           minimapCtx.fill();
         });
-
-        // Gracz
+        minimapCtx.fillStyle = "blue";
+        gameState.playerUnits.forEach((u) => {
+          const pos = worldToGrid(u.mesh.position);
+          minimapCtx.beginPath();
+          minimapCtx.arc(
+            pos.x * MINIMAP_SCALE + 2,
+            pos.z * MINIMAP_SCALE + 2,
+            MINIMAP_SCALE / 2,
+            0,
+            7
+          );
+          minimapCtx.fill();
+        });
         minimapCtx.fillStyle = "yellow";
         const playerPos = worldToGrid(hero.position);
         minimapCtx.beginPath();
-        // --- POPRAWIONA LINIA ---
         minimapCtx.arc(
-          playerPos.x * MINIMAP_SCALE + MINIMAP_SCALE / 2,
-          playerPos.z * MINIMAP_SCALE + MINIMAP_SCALE / 2,
-          MINIMAP_SCALE * 1.5,
+          playerPos.x * MINIMAP_SCALE + 2,
+          playerPos.z * MINIMAP_SCALE + 2,
+          MINIMAP_SCALE,
           0,
-          2 * Math.PI
+          7
         );
         minimapCtx.fill();
       }
 
-      // ====================================================================
-      // GŁÓWNA PĘTLA GRY
-      // ====================================================================
-
       const clock = new THREE.Clock();
-
       function animate() {
         requestAnimationFrame(animate);
         const delta = clock.getDelta();
 
-        // Ruch bohatera
         if (path.length > 0) {
           const targetNode = path[0];
           const targetPos = gridToWorld(targetNode.x, targetNode.z);
-
           const direction = targetPos.clone().sub(hero.position).normalize();
-          const speed = 5 * delta;
-          hero.position.add(direction.multiplyScalar(speed));
-
+          hero.position.add(direction.multiplyScalar(5 * delta));
           if (hero.position.distanceTo(targetPos) < 0.2) {
             hero.position.copy(targetPos);
             path.shift();
-
             if (path.length === 0) {
-              handleAction(clock);
+              handleAction();
             }
           }
           updateCameraPosition();
         }
 
-        // Aktualizacja wrogów
-        gameState.enemies.forEach((enemy) => enemy.update(delta, clock));
+        const playerPotentialTargets = [
+          ...gameState.enemyUnits,
+          gameState.enemyBase.userData.parent,
+        ];
+        gameState.playerUnits.forEach((unit) =>
+          unit.update(delta, clock, playerPotentialTargets, gameState.enemyBase)
+        );
 
-        // Aktualizacja UI
+        const enemyPotentialTargets = [
+          ...gameState.playerUnits,
+          gameState.player.mesh.userData.parent,
+        ];
+        if (gameState.playerBase)
+          enemyPotentialTargets.push(gameState.playerBase.userData.parent);
+        gameState.enemyUnits.forEach((unit) =>
+          unit.update(delta, clock, enemyPotentialTargets, gameState.playerBase)
+        );
+
         healthBarFillEl.style.width = `${
           (gameState.player.health / gameState.player.maxHealth) * 100
         }%`;
@@ -1239,19 +1319,14 @@
         stoneAmountEl.textContent = gameState.resources.stone;
         goldAmountEl.textContent = gameState.resources.gold;
 
+        enemySpawner.update(delta);
         drawMinimap();
-
         renderer.render(scene, camera);
       }
-
-      // ====================================================================
-      // INICJALIZACJA I LISTENERY
-      // ====================================================================
 
       function init() {
         generateWorld();
         createHero();
-        spawnEnemies();
 
         window.addEventListener(
           "resize",
@@ -1262,28 +1337,29 @@
           },
           false
         );
-
         renderer.domElement.addEventListener("click", onMouseClick, false);
         renderer.domElement.addEventListener(
           "contextmenu",
           onRightClick,
           false
         );
+        window.addEventListener("keypress", onKeyPress, false);
 
-        // Listenery dla przycisków budowy
-        document.querySelectorAll(".build-button").forEach((button) => {
-          button.addEventListener("click", (e) => {
-            if (!button.classList.contains("disabled")) {
-              build(button.dataset.building);
-            }
+        document.querySelectorAll("#build-menu .menu-button").forEach((b) =>
+          b.addEventListener("click", (e) => {
+            if (!b.classList.contains("disabled")) build(b.dataset.building);
             e.stopPropagation();
-          });
-        });
+          })
+        );
+        document.querySelectorAll("#train-menu .menu-button").forEach((b) =>
+          b.addEventListener("click", (e) => {
+            if (!b.classList.contains("disabled")) trainUnit(b.dataset.unit);
+            e.stopPropagation();
+          })
+        );
 
         animate();
-        showActionInfo(
-          "Witaj w grze! Kliknij, by się poruszać. PPM, by budować."
-        );
+        showActionInfo("Witaj! Poruszaj się LPM. Naciśnij 'B' by budować.");
       }
 
       init();
