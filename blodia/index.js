@@ -1,42 +1,84 @@
-// server.js (Serwer Gry i Panel Statystyk)
 const http = require('http');
 const crypto = require('crypto');
 
 // ==============================================================================
-// 1. STAN GRY (Source of Truth)
+// 1. GENERATOR LOSOWOŚCI (Seeded PRNG)
 // ==============================================================================
-const gameState = {
-    mapSeed: Math.floor(Math.random() * 1000000), 
-    resources: { wood: 1000, stone: 1000, spice: 800 },
-    players: {},
-    gatheredNodes: [],
-    buildings:[]
-};
+function mulberry32(a) {
+    return function() {
+      var t = a += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+}
 
+// ==============================================================================
+// 2. STAN GRY
+// ==============================================================================
+let gameState = {};
+let prng;
 let nextPlayerId = 1;
-const startTime = Date.now();
+let nextItemId = 1;
+let startTime = Date.now();
+
+const ITEM_TEMPLATES =[
+    { type: 'sword', name: 'Zardzewiały Miecz', color: 0x888888, dmg: 15, range: 2.5, isRanged: false },
+    { type: 'sword', name: 'Stalowy Miecz', color: 0xdddddd, dmg: 25, range: 2.5, isRanged: false },
+    { type: 'bow', name: 'Krótki Łuk', color: 0x8B4513, dmg: 10, range: 15.0, isRanged: true },
+    { type: 'shield', name: 'Drewniana Tarcza', color: 0x5c4033, def: 5 },
+    { type: 'shield', name: 'Żelazna Tarcza', color: 0x666677, def: 12 }
+];
+
+function initGame() {
+    const seed = Math.floor(Math.random() * 1000000);
+    prng = mulberry32(seed);
+    
+    gameState = {
+        mapSeed: seed,
+        players: {},
+        itemsOnGround: {},
+        projectiles:[]
+    };
+
+    for(let i=0; i<30; i++) {
+        let x, z;
+        do {
+            x = Math.floor(prng() * 90) + 5; 
+            z = Math.floor(prng() * 90) + 5;
+        } while (Math.hypot(x - 50, z - 50) < 18); 
+
+        const template = ITEM_TEMPLATES[Math.floor(prng() * ITEM_TEMPLATES.length)];
+        const item = { id: `item_${nextItemId++}`, x: x, z: z, ...template };
+        gameState.itemsOnGround[item.id] = item;
+    }
+}
+initGame(); 
+
+function isInSafeZone(x, z) {
+    return Math.hypot(x - 50, z - 50) < 16; 
+}
 
 // ==============================================================================
-// 2. SERWER HTTP (Panel Statystyk na adresie /blodia-server/)
+// 3. SERWER HTTP (Panel Statystyk + Przycisk Resetu)
 // ==============================================================================
 const server = http.createServer((req, res) => {
-    // Generowanie HTML z aktualnymi statystykami
+    if (req.url === '/reset-server' && req.method === 'POST') {
+        initGame();
+        broadcast({ type: 'SERVER_RESET', mapSeed: gameState.mapSeed });
+        res.writeHead(200);
+        return res.end('OK');
+    }
+
     const activePlayersCount = Object.keys(gameState.players).length;
+    const itemsCount = Object.keys(gameState.itemsOnGround).length;
     const uptimeMinutes = Math.floor((Date.now() - startTime) / 60000);
     
-    // Lista graczy w formie HTML
     let playersListHTML = '';
-    for (const [id, data] of Object.entries(gameState.players)) {
-        playersListHTML += `<li><strong>${id}</strong> - Pozycja: X:${data.x}, Z:${data.z} (HP: ${data.health})</li>`;
+    for (const[id, data] of Object.entries(gameState.players)) {
+        playersListHTML += `<li><strong>${data.nickname}</strong> (${id}) - HP: ${data.health}/100 | X:${Math.round(data.x)}, Z:${Math.round(data.z)} ${isInSafeZone(data.x, data.z) ? '🛡️ (Miasto)' : '⚔️'}</li>`;
     }
     if (playersListHTML === '') playersListHTML = '<li>Brak aktywnych graczy na mapie.</li>';
-
-    // Lista budynków
-    let buildingsListHTML = '';
-    gameState.buildings.forEach(b => {
-        buildingsListHTML += `<li>${b.type.toUpperCase()} (X:${b.x}, Z:${b.z})</li>`;
-    });
-    if (buildingsListHTML === '') buildingsListHTML = '<li>Mapa jest pusta.</li>';
 
     const htmlResponse = `
     <!DOCTYPE html>
@@ -51,17 +93,20 @@ const server = http.createServer((req, res) => {
             h1 { color: #4CAF50; border-bottom: 2px solid #4CAF50; padding-bottom: 10px; }
             .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
             .card { background: #353550; padding: 15px; border-radius: 8px; border-left: 4px solid #4CAF50; }
+            .card.danger { border-left-color: #f44336; }
             ul { list-style: none; padding: 0; }
             ul li { background: #2a2a40; margin-bottom: 5px; padding: 8px; border-radius: 4px; }
-            .refresh-btn { display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; margin-top: 20px; font-weight: bold;}
-            .refresh-btn:hover { background: #45a049; }
+            .btn { display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; margin-top: 20px; font-weight: bold; cursor: pointer; border: none;}
+            .btn:hover { background: #45a049; }
+            .btn-danger { background: #f44336; }
+            .btn-danger:hover { background: #d32f2f; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🚀 Blodia Game Server - Status Działania</h1>
+            <h1>🚀 Blodia Game Server - Action RPG</h1>
             <p><strong>Status:</strong> <span style="color:#4CAF50;">ZAAKCEPTOWANO POŁĄCZENIA ✅</span></p>
-            <p><strong>Czas działania (Uptime):</strong> ${uptimeMinutes} minut</p>
+            <p><strong>Czas działania:</strong> ${uptimeMinutes} minut</p>
             <p><strong>Ziarno mapy (Seed):</strong> ${gameState.mapSeed}</p>
 
             <div class="stats-grid">
@@ -70,27 +115,28 @@ const server = http.createServer((req, res) => {
                     <ul>${playersListHTML}</ul>
                 </div>
                 <div class="card">
-                    <h3>🏦 Wspólne zasoby</h3>
+                    <h3>🗡️ Świat</h3>
                     <ul>
-                        <li>🌲 Drewno: <strong>${gameState.resources.wood}</strong></li>
-                        <li>⛏️ Kamień: <strong>${gameState.resources.stone}</strong></li>
-                        <li>💰 Melanż: <strong>${gameState.resources.spice}</strong></li>
+                        <li>Przedmioty leżące na ziemi: <strong>${itemsCount}</strong></li>
                     </ul>
                 </div>
             </div>
 
-            <div class="card" style="margin-top: 20px;">
-                <h3>🏗️ Postawione budynki (${gameState.buildings.length})</h3>
-                <ul>${buildingsListHTML}</ul>
+            <div class="card danger" style="margin-top: 20px;">
+                <h3>⚠️ Panel Administracyjny</h3>
+                <p>Użyj tego przycisku, aby wygenerować nową mapę, wyczyścić przedmioty i zresetować wszystkich graczy.</p>
+                <button onclick="resetServer()" class="btn btn-danger">TWARDY RESET SERWERA 💥</button>
             </div>
-            
-            <div class="card" style="margin-top: 20px;">
-                <h3>⛏️ Wyeksploatowane złoża</h3>
-                <p>${gameState.gatheredNodes.length} zniszczonych źródeł na mapie.</p>
-            </div>
-
-            <a href="#" onclick="window.location.reload()" class="refresh-btn">Odśwież dane 🔄</a>
+            <br>
+            <a href="#" onclick="window.location.reload()" class="btn">Odśwież dane statystyk 🔄</a>
         </div>
+        <script>
+            function resetServer() {
+                if(confirm("Czy na pewno chcesz zresetować serwer? Wszyscy gracze zostaną rozłączeni, a mapa wygeneruje się na nowo!")) {
+                    fetch('/reset-server', { method: 'POST' }).then(() => window.location.reload());
+                }
+            }
+        </script>
     </body>
     </html>
     `;
@@ -100,7 +146,7 @@ const server = http.createServer((req, res) => {
 });
 
 // ==============================================================================
-// 3. NATYWNA OBSŁUGA WEBSOCKETÓW (Nasłuch dla gry)
+// 4. NATYWNA OBSŁUGA WEBSOCKETÓW
 // ==============================================================================
 const clients = new Set();
 
@@ -187,19 +233,27 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 // ==============================================================================
-// 4. LOGIKA WEBSOCKET
+// 5. LOGIKA GRY (WebSockets)
 // ==============================================================================
 function handleNewConnection(socket) {
     const playerId = `Gracz_${nextPlayerId++}`;
-    // Pozycja początkowa w koordynatach świata (Grid 10,40 * TILE_SIZE 2)
-    gameState.players[playerId] = { x: 20, z: 80, health: 100, rotation: 0, nickname: 'Anonim' };
+    
+    gameState.players[playerId] = { 
+        x: 50, z: 50, 
+        health: 100, maxHealth: 100,
+        rotation: 0, 
+        nickname: 'Anonim',
+        inventory:[], 
+        equipment: { left: null, right: null }
+    };
     socket.playerId = playerId;
 
-    // Wysyłka całego stanu nowemu graczowi
     socket.send(JSON.stringify({
-        type: 'INIT', playerId: playerId, mapSeed: gameState.mapSeed,
-        resources: gameState.resources, players: gameState.players,
-        gatheredNodes: gameState.gatheredNodes, buildings: gameState.buildings
+        type: 'INIT', 
+        playerId: playerId, 
+        mapSeed: gameState.mapSeed,
+        players: gameState.players,
+        itemsOnGround: gameState.itemsOnGround
     }));
 }
 
@@ -207,47 +261,118 @@ function handleMessage(socket, message) {
     try {
         const data = JSON.parse(message);
         const playerId = socket.playerId;
+        const player = gameState.players[playerId];
+        if (!player) return;
 
         switch (data.type) {
             case 'SET_NICKNAME':
-                if (gameState.players[playerId]) {
-                    gameState.players[playerId].nickname = data.nickname || 'Anonim';
-                    broadcast({ type: 'PLAYER_JOINED', playerId: playerId, position: gameState.players[playerId], nickname: gameState.players[playerId].nickname });
-                }
+                player.nickname = data.nickname || 'Anonim';
+                broadcast({ type: 'PLAYER_JOINED', playerId: playerId, player: player });
                 break;
+                
             case 'MOVE':
-                if (gameState.players[playerId]) {
-                    gameState.players[playerId].x = data.x; 
-                    gameState.players[playerId].z = data.z;
-                    gameState.players[playerId].rotation = data.rotation || 0;
-                    broadcast({ type: 'PLAYER_MOVED', playerId: playerId, x: data.x, z: data.z, rotation: data.rotation }, socket);
+                player.x = data.x; 
+                player.z = data.z;
+                player.rotation = data.rotation || 0;
+                broadcast({ type: 'PLAYER_MOVED', playerId: playerId, x: data.x, z: data.z, rotation: data.rotation }, socket);
+                break;
+
+            case 'ATTACK':
+                if (isInSafeZone(player.x, player.z)) return; 
+                
+                const target = gameState.players[data.targetId];
+                if (!target) return;
+                
+                if (isInSafeZone(target.x, target.z)) return;
+
+                let weapon = data.hand === 'left' ? player.equipment.left : player.equipment.right;
+                let isRanged = weapon && weapon.isRanged;
+                let damage = weapon && weapon.dmg ? weapon.dmg : 5; 
+                let range = weapon && weapon.range ? weapon.range : 2.5;
+
+                const dist = Math.hypot(player.x - target.x, player.z - target.z);
+                
+                if (dist <= range) {
+                    broadcast({ type: 'ACTION_ANIMATION', playerId: playerId, action: isRanged ? 'shoot' : 'swing', targetId: data.targetId });
+
+                    let targetDef = 0;
+                    if (target.equipment.left && target.equipment.left.def) targetDef += target.equipment.left.def;
+                    if (target.equipment.right && target.equipment.right.def) targetDef += target.equipment.right.def;
+                    
+                    let finalDmg = Math.max(1, damage - targetDef);
+                    
+                    setTimeout(() => {
+                        if(gameState.players[data.targetId]) {
+                            target.health -= finalDmg;
+                            if(target.health <= 0) {
+                                target.health = target.maxHealth;
+                                target.x = 50; target.z = 50; 
+                                broadcast({ type: 'PLAYER_DIED', playerId: data.targetId });
+                            }
+                            broadcast({ type: 'UPDATE_HEALTH', playerId: data.targetId, health: target.health });
+                        }
+                    }, isRanged ? 400 : 0);
                 }
                 break;
-            case 'GATHER':
-                const nodeKey = `${data.gridX},${data.gridZ}`;
-                if (!gameState.gatheredNodes.includes(nodeKey)) {
-                    gameState.gatheredNodes.push(nodeKey);
-                    gameState.resources.wood += data.amounts.wood || 0;
-                    gameState.resources.stone += data.amounts.stone || 0;
-                    gameState.resources.spice += data.amounts.spice || 0;
-                    broadcast({ type: 'RESOURCE_GATHERED', gridX: data.gridX, gridZ: data.gridZ, resources: gameState.resources });
+
+            case 'PICKUP_ITEM':
+                const itemToPick = gameState.itemsOnGround[data.itemId];
+                if (itemToPick && player.inventory.length < 10) {
+                    const distToItem = Math.hypot(player.x - itemToPick.x, player.z - itemToPick.z);
+                    if (distToItem < 4.0) {
+                        delete gameState.itemsOnGround[data.itemId];
+                        player.inventory.push(itemToPick);
+                        
+                        socket.send(JSON.stringify({ type: 'INVENTORY_UPDATED', inventory: player.inventory, equipment: player.equipment }));
+                        broadcast({ type: 'ITEM_REMOVED', itemId: data.itemId });
+                    }
                 }
                 break;
-            case 'BUILD':
-                const cost = data.cost;
-                if (gameState.resources.wood >= cost.wood && gameState.resources.stone >= cost.stone && gameState.resources.spice >= cost.spice) {
-                    gameState.resources.wood -= cost.wood; gameState.resources.stone -= cost.stone; gameState.resources.spice -= cost.spice;
-                    const building = { type: data.buildingType, x: data.gridX, z: data.gridZ };
-                    gameState.buildings.push(building);
-                    broadcast({ type: 'BUILDING_ADDED', building: building, resources: gameState.resources });
+
+            case 'DROP_ITEM':
+                let droppedItem = null;
+                if (data.from === 'inventory') {
+                    droppedItem = player.inventory.splice(data.index, 1)[0];
+                } else if (data.from === 'left' || data.from === 'right') {
+                    droppedItem = player.equipment[data.from];
+                    player.equipment[data.from] = null;
+                    broadcast({ type: 'EQUIPMENT_UPDATED', playerId: playerId, equipment: player.equipment });
+                }
+
+                if (droppedItem) {
+                    droppedItem.x = player.x + (Math.random() * 2 - 1);
+                    droppedItem.z = player.z + (Math.random() * 2 - 1);
+                    gameState.itemsOnGround[droppedItem.id] = droppedItem;
+                    
+                    socket.send(JSON.stringify({ type: 'INVENTORY_UPDATED', inventory: player.inventory, equipment: player.equipment }));
+                    broadcast({ type: 'ITEM_SPAWNED', item: droppedItem });
                 }
                 break;
-            case 'TRAIN':
-                gameState.resources.wood -= data.cost.wood; gameState.resources.stone -= data.cost.stone; gameState.resources.spice -= data.cost.spice;
-                broadcast({ type: 'UNIT_TRAINED', resources: gameState.resources });
+
+            case 'EQUIP_ITEM':
+                if (data.index >= 0 && data.index < player.inventory.length) {
+                    const item = player.inventory[data.index];
+                    const previousEquipped = player.equipment[data.slot];
+                    player.equipment[data.slot] = item;
+                    player.inventory.splice(data.index, 1);
+                    if (previousEquipped) player.inventory.push(previousEquipped);
+                    
+                    socket.send(JSON.stringify({ type: 'INVENTORY_UPDATED', inventory: player.inventory, equipment: player.equipment }));
+                    broadcast({ type: 'EQUIPMENT_UPDATED', playerId: playerId, equipment: player.equipment });
+                }
+                break;
+
+            case 'UNEQUIP_ITEM':
+                if (player.equipment[data.slot] && player.inventory.length < 10) {
+                    player.inventory.push(player.equipment[data.slot]);
+                    player.equipment[data.slot] = null;
+                    
+                    socket.send(JSON.stringify({ type: 'INVENTORY_UPDATED', inventory: player.inventory, equipment: player.equipment }));
+                    broadcast({ type: 'EQUIPMENT_UPDATED', playerId: playerId, equipment: player.equipment });
+                }
                 break;
         }
-    } catch (e) { console.error('Błąd:', e); }
+    } catch (e) { console.error('Błąd logiczny serwera:', e); }
 }
 
 function handleDisconnect(socket) {
@@ -262,8 +387,7 @@ function broadcast(data, excludeWs = null) {
     clients.forEach(client => { if (client !== excludeWs && !client.destroyed) client.send(message); });
 }
 
-// Uruchomienie portu przydzielonego przez Seohost
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Serwer gry nasłuchuje na porcie: ${PORT}`);
+    console.log(`Blodia Server (ARPG) nasłuchuje na porcie: ${PORT}`);
 });
