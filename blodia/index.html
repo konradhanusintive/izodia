@@ -554,16 +554,41 @@
       const raycaster = new THREE.Raycaster();
       const mouse = new THREE.Vector2();
       let currentAction = null;
+      let isMouseDown = false;
+      let mouseUpdateTimer = 0;
+      const MOUSE_UPDATE_INTERVAL = 0.15; // 150ms recalculation
 
-      function onMouseClick(event) {
-        if(event.target.tagName === 'BUTTON') return; 
-        
+      function updateMousePos(event) {
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      }
+
+      function onMouseDown(event) {
+        if(event.target.tagName === 'BUTTON') return; 
+        isMouseDown = true;
+        updateMousePos(event);
+        handleDiabloClick(true);
+      }
+
+      function onMouseUp(event) {
+        isMouseDown = false;
+      }
+
+      function onMouseMove(event) {
+        if (isMouseDown) {
+          updateMousePos(event);
+        }
+      }
+
+      function handleDiabloClick(isInitialClick = false) {
         raycaster.setFromCamera(mouse, camera);
         const intersects = raycaster.intersectObjects(scene.children, true);
-        buildMenuEl.style.display = "none"; trainMenuEl.style.display = "none"; factoryMenuEl.style.display = "none";
         
+        // UI hiding
+        if (isInitialClick) {
+          buildMenuEl.style.display = "none"; trainMenuEl.style.display = "none"; factoryMenuEl.style.display = "none";
+        }
+
         if (intersects.length > 0) {
           let clickedObject = intersects[0].object;
           while (clickedObject.parent && clickedObject.parent.type !== "Scene") {
@@ -572,7 +597,7 @@
           }
           const data = clickedObject.userData;
           
-          if (data.type === "building") {
+          if (isInitialClick && data.type === "building") {
               if (data.building === "barracks") { updateTrainMenu(); trainMenuEl.style.display = "flex"; return; }
               if (data.building === "factory") { updateFactoryMenu(); factoryMenuEl.style.display = "flex"; return; }
           }
@@ -589,13 +614,19 @@
           }
           
           if (currentAction) {
-            path = findPath(currentGridPos, targetGridPos);
-            if (path.length === 0 && currentAction.type === "gather") {
+            const newPath = findPath(currentGridPos, targetGridPos);
+            if (newPath.length > 0) {
+              path = newPath;
+            } else if (currentAction.type === "gather") {
+              // Try neighbor nodes if gathering
               const neighbors =[{ x: targetGridPos.x + 1, z: targetGridPos.z }, { x: targetGridPos.x - 1, z: targetGridPos.z }, { x: targetGridPos.x, z: targetGridPos.z + 1 }, { x: targetGridPos.x, z: targetGridPos.z - 1 }];
               for (const n of neighbors) {
                 if (n.x >= 0 && n.x < MAP_WIDTH && n.z >= 0 && n.z < MAP_HEIGHT && grid[n.x][n.z] === 0) {
-                  path = findPath(currentGridPos, n);
-                  if (path.length > 0) break;
+                  const neighborPath = findPath(currentGridPos, n);
+                  if (neighborPath.length > 0) {
+                    path = neighborPath;
+                    break;
+                  }
                 }
               }
             }
@@ -716,6 +747,13 @@
       // ====================================================================
       // PĘTLA GRY
       // ====================================================================
+      function lerpAngle(a, b, t) {
+          let diff = b - a;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          return a + diff * t;
+      }
+
       const clock = new THREE.Clock();
       let lastNetworkPos = new THREE.Vector3();
       let networkUpdateTimer = 0;
@@ -725,6 +763,17 @@
         requestAnimationFrame(animate);
         const delta = clock.getDelta();
         let isHeroMoving = false;
+
+        // Diablo-style hold to move
+        if (isMouseDown) {
+          mouseUpdateTimer += delta;
+          if (mouseUpdateTimer >= MOUSE_UPDATE_INTERVAL) {
+            handleDiabloClick(false);
+            mouseUpdateTimer = 0;
+          }
+        } else {
+          mouseUpdateTimer = 0;
+        }
 
         if (path.length > 0) {
           isHeroMoving = true;
@@ -745,7 +794,7 @@
               
               // Obrót w stronę ruchu
               const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
-              hero.rotation.y = THREE.MathUtils.lerpAngle(hero.rotation.y, targetRotation, 0.2);
+              hero.rotation.y = lerpAngle(hero.rotation.y, targetRotation, 0.2);
           }
 
           hero.position.y = getInterpolatedHeight(hero.position.x, hero.position.z);
@@ -783,7 +832,7 @@
              p.mesh.position.y = getInterpolatedHeight(p.mesh.position.x, p.mesh.position.z);
              
              if (p.targetRotation !== undefined) {
-                 p.mesh.rotation.y = THREE.MathUtils.lerpAngle(p.mesh.rotation.y, p.targetRotation, 0.15);
+                 p.mesh.rotation.y = lerpAngle(p.mesh.rotation.y, p.targetRotation, 0.15);
              }
 
              // Czy się rusza?
@@ -814,7 +863,9 @@
         updateUI(); 
 
         window.addEventListener("resize", () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }, false);
-        renderer.domElement.addEventListener("click", onMouseClick, false);
+        renderer.domElement.addEventListener("mousedown", onMouseDown, false);
+        window.addEventListener("mouseup", onMouseUp, false);
+        window.addEventListener("mousemove", onMouseMove, false);
         window.addEventListener("keypress", onKeyPress, false);
         document.querySelectorAll("#build-menu .menu-button").forEach((b) => b.addEventListener("click", (e) => { if (!b.classList.contains("disabled")) build(b.dataset.building); e.stopPropagation(); }));
 
