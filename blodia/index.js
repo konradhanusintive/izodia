@@ -192,7 +192,7 @@ server.on('upgrade', (req, socket, head) => {
 function handleNewConnection(socket) {
     const playerId = `Gracz_${nextPlayerId++}`;
     // Pozycja początkowa w koordynatach świata (Grid 10,40 * TILE_SIZE 2)
-    gameState.players[playerId] = { x: 20, z: 80, health: 100, rotation: 0 };
+    gameState.players[playerId] = { x: 20, z: 80, health: 100, rotation: 0, nickname: 'Anonim' };
     socket.playerId = playerId;
 
     // Wysyłka całego stanu nowemu graczowi
@@ -201,9 +201,6 @@ function handleNewConnection(socket) {
         resources: gameState.resources, players: gameState.players,
         gatheredNodes: gameState.gatheredNodes, buildings: gameState.buildings
     }));
-
-    // Powiadomienie innych
-    broadcast({ type: 'PLAYER_JOINED', playerId: playerId, position: gameState.players[playerId] }, socket);
 }
 
 function handleMessage(socket, message) {
@@ -212,6 +209,12 @@ function handleMessage(socket, message) {
         const playerId = socket.playerId;
 
         switch (data.type) {
+            case 'SET_NICKNAME':
+                if (gameState.players[playerId]) {
+                    gameState.players[playerId].nickname = data.nickname || 'Anonim';
+                    broadcast({ type: 'PLAYER_JOINED', playerId: playerId, position: gameState.players[playerId], nickname: gameState.players[playerId].nickname });
+                }
+                break;
             case 'MOVE':
                 if (gameState.players[playerId]) {
                     gameState.players[playerId].x = data.x; 
