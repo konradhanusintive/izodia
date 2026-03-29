@@ -59,6 +59,24 @@ function isInSafeZone(x, z) {
     return Math.hypot(x - 50, z - 50) < 16; 
 }
 
+function spawnAirdrop(count = 10) {
+    const dropped = [];
+    for(let i=0; i<count; i++) {
+        let x, z;
+        do {
+            x = Math.floor(Math.random() * 90) + 5; 
+            z = Math.floor(Math.random() * 90) + 5;
+        } while (Math.hypot(x - 50, z - 50) < 12); // Omiń środek miasta
+
+        const template = ITEM_TEMPLATES[Math.floor(Math.random() * ITEM_TEMPLATES.length)];
+        const item = { id: `item_${nextItemId++}`, x: x, z: z, ...template };
+        gameState.itemsOnGround[item.id] = item;
+        dropped.push(item);
+        broadcast({ type: 'ITEM_SPAWNED', item: item });
+    }
+    return dropped.length;
+}
+
 // ==============================================================================
 // 3. SERWER HTTP (Panel Statystyk + Przycisk Resetu)
 // ==============================================================================
@@ -68,6 +86,20 @@ const server = http.createServer((req, res) => {
         broadcast({ type: 'SERVER_RESET', mapSeed: gameState.mapSeed });
         res.writeHead(200);
         return res.end('OK');
+    }
+
+    if (req.url.startsWith('/airdrop') && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+            const params = new URLSearchParams(body);
+            const count = parseInt(params.get('count')) || 5;
+            const spawned = spawnAirdrop(count);
+            broadcast({ type: 'CHAT_MESSAGE', text: `📦 ZRZUT ZAOPATRZENIA! Na mapie pojawiło się ${spawned} nowych przedmiotów!` });
+            res.writeHead(200);
+            res.end(`Spawned ${spawned} items`);
+        });
+        return;
     }
 
     const activePlayersCount = Object.keys(gameState.players).length;
@@ -94,45 +126,54 @@ const server = http.createServer((req, res) => {
             .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; }
             .card { background: #353550; padding: 15px; border-radius: 8px; border-left: 4px solid #4CAF50; }
             .card.danger { border-left-color: #f44336; }
+            .card.info { border-left-color: #2196F3; }
             ul { list-style: none; padding: 0; }
             ul li { background: #2a2a40; margin-bottom: 5px; padding: 8px; border-radius: 4px; }
-            .btn { display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; margin-top: 20px; font-weight: bold; cursor: pointer; border: none;}
+            .btn { display: inline-block; padding: 10px 20px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px; font-weight: bold; cursor: pointer; border: none;}
             .btn:hover { background: #45a049; }
             .btn-danger { background: #f44336; }
-            .btn-danger:hover { background: #d32f2f; }
+            .btn-info { background: #2196F3; }
+            input { padding: 8px; border-radius: 4px; border: 1px solid #444; background: #222; color: white; width: 60px; }
         </style>
     </head>
     <body>
         <div class="container">
             <h1>🚀 Blodia Game Server - Action RPG</h1>
             <p><strong>Status:</strong> <span style="color:#4CAF50;">ZAAKCEPTOWANO POŁĄCZENIA ✅</span></p>
-            <p><strong>Czas działania:</strong> ${uptimeMinutes} minut</p>
-            <p><strong>Ziarno mapy (Seed):</strong> ${gameState.mapSeed}</p>
-
+            
             <div class="stats-grid">
                 <div class="card">
-                    <h3>👥 Podłączeni gracze (${activePlayersCount})</h3>
+                    <h3>👥 Gracze (${activePlayersCount})</h3>
                     <ul>${playersListHTML}</ul>
                 </div>
-                <div class="card">
-                    <h3>🗡️ Świat</h3>
-                    <ul>
-                        <li>Przedmioty leżące na ziemi: <strong>${itemsCount}</strong></li>
-                    </ul>
+                <div class="card info">
+                    <h3>📦 Airdrop Przedmiotów</h3>
+                    <p>Zrzuć nowe zestawy broni na mapę:</p>
+                    <input type="number" id="airdrop-count" value="10" min="1" max="50">
+                    <button onclick="triggerAirdrop()" class="btn btn-info">WYŚLIJ ZRZUT 🛩️</button>
+                    <p><small>Przedmioty na ziemi: <strong>${itemsCount}</strong></small></p>
                 </div>
             </div>
 
             <div class="card danger" style="margin-top: 20px;">
                 <h3>⚠️ Panel Administracyjny</h3>
-                <p>Użyj tego przycisku, aby wygenerować nową mapę, wyczyścić przedmioty i zresetować wszystkich graczy.</p>
                 <button onclick="resetServer()" class="btn btn-danger">TWARDY RESET SERWERA 💥</button>
             </div>
-            <br>
-            <a href="#" onclick="window.location.reload()" class="btn">Odśwież dane statystyk 🔄</a>
         </div>
         <script>
+            function triggerAirdrop() {
+                const count = document.getElementById('airdrop-count').value;
+                fetch('/airdrop', { 
+                    method: 'POST', 
+                    body: 'count=' + count,
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                }).then(() => {
+                    alert('Zrzut wysłany!');
+                    window.location.reload();
+                });
+            }
             function resetServer() {
-                if(confirm("Czy na pewno chcesz zresetować serwer? Wszyscy gracze zostaną rozłączeni, a mapa wygeneruje się na nowo!")) {
+                if(confirm("Czy na pewno chcesz zresetować serwer?")) {
                     fetch('/reset-server', { method: 'POST' }).then(() => window.location.reload());
                 }
             }
@@ -280,38 +321,83 @@ function handleMessage(socket, message) {
             case 'ATTACK':
                 if (isInSafeZone(player.x, player.z)) return; 
                 
-                const target = gameState.players[data.targetId];
-                if (!target) return;
-                
-                if (isInSafeZone(target.x, target.z)) return;
-
-                let weapon = data.hand === 'left' ? player.equipment.left : player.equipment.right;
+                // Ustalenie broni by wiedzieć jaką animację puścić (nawet bez celu)
+                let weapon = data.hand === 'left' ? player.equipment.right : player.equipment.left;
+                const otherHand = data.hand === 'left' ? player.equipment.left : player.equipment.right;
+                if (!weapon || (!weapon.dmg && otherHand && otherHand.dmg)) {
+                    weapon = otherHand;
+                }
                 let isRanged = weapon && weapon.isRanged;
-                let damage = weapon && weapon.dmg ? weapon.dmg : 5; 
-                let range = weapon && weapon.range ? weapon.range : 2.5;
+
+                const target = gameState.players[data.targetId];
+                
+                // Jeśli brak celu, tylko puszczamy animację (atak w miejscu / Shift+Click)
+                if (!target || isInSafeZone(target.x, target.z)) {
+                    broadcast({ type: 'ACTION_ANIMATION', playerId: playerId, action: isRanged ? 'shoot' : 'swing', targetId: null });
+                    return;
+                }
+
+                let damage = weapon && weapon.dmg ? weapon.dmg : 8; 
+                let range = weapon && weapon.range ? weapon.range : 3.0;
 
                 const dist = Math.hypot(player.x - target.x, player.z - target.z);
                 
                 if (dist <= range) {
                     broadcast({ type: 'ACTION_ANIMATION', playerId: playerId, action: isRanged ? 'shoot' : 'swing', targetId: data.targetId });
 
+                    // Obliczanie obrony celu (Tarcza dodaje DEF)
                     let targetDef = 0;
                     if (target.equipment.left && target.equipment.left.def) targetDef += target.equipment.left.def;
                     if (target.equipment.right && target.equipment.right.def) targetDef += target.equipment.right.def;
                     
-                    let finalDmg = Math.max(1, damage - targetDef);
+                    let finalDmg = Math.max(2, damage - targetDef);
                     
                     setTimeout(() => {
                         if(gameState.players[data.targetId]) {
                             target.health -= finalDmg;
                             if(target.health <= 0) {
                                 target.health = target.maxHealth;
+                                
+                                // DROP LOOT - Cały plecak i ekwipunek na ziemię
+                                const itemsToDrop = [...target.inventory];
+                                if(target.equipment.left) itemsToDrop.push(target.equipment.left);
+                                if(target.equipment.right) itemsToDrop.push(target.equipment.right);
+                                
+                                itemsToDrop.forEach(item => {
+                                    item.x = target.x + (Math.random() * 2 - 1);
+                                    item.z = target.z + (Math.random() * 2 - 1);
+                                    gameState.itemsOnGround[item.id] = item;
+                                    broadcast({ type: 'ITEM_SPAWNED', item: item });
+                                });
+                                
+                                target.inventory = [];
+                                target.equipment = { left: null, right: null };
+                                
                                 target.x = 50; target.z = 50; 
-                                broadcast({ type: 'PLAYER_DIED', playerId: data.targetId });
+                                
+                                const killMessages = [
+                                    "został wysłany na wcześniejszą emeryturę!",
+                                    "postanowił zbadać glebę z bliska.",
+                                    "doświadczył nagłej dekapitacji.",
+                                    "zniknął w obłoku porażki.",
+                                    "zapomniał jak się blokuje.",
+                                    "został przerobiony na karmę dla smoków."
+                                ];
+                                const funnyMsg = `${target.nickname} ${killMessages[Math.floor(Math.random()*killMessages.length)]}`;
+                                
+                                broadcast({ 
+                                    type: 'PLAYER_DIED', 
+                                    playerId: data.targetId, 
+                                    killerId: playerId,
+                                    msg: funnyMsg
+                                });
+                                
+                                // Aktualizacja ekwipunku ofiary (pusty)
+                                socket.send(JSON.stringify({ type: 'INVENTORY_UPDATED', inventory: target.inventory, equipment: target.equipment }));
                             }
                             broadcast({ type: 'UPDATE_HEALTH', playerId: data.targetId, health: target.health });
                         }
-                    }, isRanged ? 400 : 0);
+                    }, isRanged ? 400 : 100);
                 }
                 break;
 
@@ -332,7 +418,9 @@ function handleMessage(socket, message) {
             case 'DROP_ITEM':
                 let droppedItem = null;
                 if (data.from === 'inventory') {
-                    droppedItem = player.inventory.splice(data.index, 1)[0];
+                    if (data.index >= 0 && data.index < player.inventory.length) {
+                        droppedItem = player.inventory.splice(data.index, 1)[0];
+                    }
                 } else if (data.from === 'left' || data.from === 'right') {
                     droppedItem = player.equipment[data.from];
                     player.equipment[data.from] = null;
@@ -352,8 +440,15 @@ function handleMessage(socket, message) {
             case 'EQUIP_ITEM':
                 if (data.index >= 0 && data.index < player.inventory.length) {
                     const item = player.inventory[data.index];
-                    const previousEquipped = player.equipment[data.slot];
-                    player.equipment[data.slot] = item;
+                    
+                    // Logika inteligentnego zakładania: jeśli tarcza to preferuj lewą, jeśli broń to prawą
+                    let preferredSlot = data.slot;
+                    if (!preferredSlot) {
+                        preferredSlot = (item.type === 'shield') ? 'left' : 'right';
+                    }
+
+                    const previousEquipped = player.equipment[preferredSlot];
+                    player.equipment[preferredSlot] = item;
                     player.inventory.splice(data.index, 1);
                     if (previousEquipped) player.inventory.push(previousEquipped);
                     
