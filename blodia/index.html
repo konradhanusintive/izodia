@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Izometryczna Gra RTS - Wieloosobowa Pustynna Planeta</title>
+    <style>
+      body { margin: 0; overflow: hidden; font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; background-color: #111; color: white; }
+      #game-container { position: relative; width: 100vw; height: 100vh; }
+      canvas { display: block; }
+      #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+      #top-bar { position: absolute; top: 10px; left: 10px; display: flex; gap: 20px; align-items: center; background: rgba(0, 0, 0, 0.5); padding: 10px; border-radius: 8px; border: 1px solid #7c5a3a; pointer-events: all;}
+      #health-bar-container { display: flex; align-items: center; gap: 10px; }
+      #health-bar { width: 200px; height: 20px; background-color: #550000; border: 1px solid #ff0000; border-radius: 4px; overflow: hidden; }
+      #health-bar-fill { width: 100%; height: 100%; background-color: #ff0000; transition: width 0.3s ease-in-out; }
+      #resource-display { display: flex; gap: 15px; }
+      .resource { display: flex; align-items: center; gap: 5px; font-size: 16px; font-weight: bold; }
+      #minimap-container { position: absolute; bottom: 10px; right: 10px; border: 2px solid #7c5a3a; background: rgba(0, 0, 0, 0.7); padding: 5px; pointer-events: all;}
+      #minimap { display: block; }
+      .menu-panel { position: absolute; bottom: 10px; left: 10px; background: rgba(0, 0, 0, 0.7); border: 1px solid #7c5a3a; border-radius: 8px; padding: 10px; display: none; pointer-events: all; flex-direction: column; gap: 5px; }
+      .menu-button { background: #4a3c2a; color: #f0e0c0; border: 1px solid #7c5a3a; padding: 8px 12px; cursor: pointer; width: 220px; text-align: left; border-radius: 4px; }
+      .menu-button:hover { background: #6a5c4a; }
+      .menu-button.disabled { background: #33281a; color: #888; cursor: not-allowed; border-color: #554433; }
+      #action-info { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(10, 5, 0, 0.8); padding: 10px 20px; border-radius: 20px; font-size: 16px; border: 1px solid #7c5a3a; color: #ffaf4d; display: none; }
+      
+      #loading-screen { position: absolute; top:0; left:0; width:100vw; height:100vh; background: #111; display:flex; justify-content:center; align-items:center; z-index: 1000; flex-direction: column;}
+      .spinner { border: 4px solid #333; border-top: 4px solid #ffaf4d; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin-bottom: 20px;}
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+    <div id="loading-screen">
+        <div class="spinner"></div>
+        <h2 id="loading-text">Łączenie z serwerem wieloosobowym...</h2>
+    </div>
+
+    <div id="game-container"></div>
+
+    <div id="ui-container">
+      <div id="top-bar">
+        <div id="health-bar-container">
+          <span>❤️</span>
+          <div id="health-bar"><div id="health-bar-fill"></div></div>
+        </div>
+        <div id="resource-display">
+          <div class="resource">🌲 <span id="wood-amount">0</span></div>
+          <div class="resource">⛏️ <span id="stone-amount">0</span></div>
+          <div class="resource">💰 <span id="spice-amount">0</span></div>
+        </div>
+      </div>
+      <div id="minimap-container"><canvas id="minimap"></canvas></div>
+      <div id="build-menu" class="menu-panel">
+        <button class="menu-button" data-building="townhall">Ratusz (150🌲 100⛏️)</button>
+        <button class="menu-button" data-building="barracks">Koszary (100🌲 50⛏️)</button>
+        <button class="menu-button" data-building="factory">Fabryka (120🌲 150⛏️)</button>
+        <button class="menu-button" data-building="spice_silo">Silos Melanżu (80🌲 120⛏️)</button>
+      </div>
+      <div id="train-menu" class="menu-panel">
+        <button class="menu-button" data-unit="swordsman">Miecznik (20🌲 10💰)</button>
+        <button class="menu-button" data-unit="shieldbearer">Tarczownik (30🌲 15💰)</button>
+        <button class="menu-button" data-unit="crossbowman">Kusznik (15🌲 25💰)</button>
+      </div>
+      <div id="factory-menu" class="menu-panel">
+        <button class="menu-button" data-unit="tank">Czołg (50⛏️ 80💰)</button>
+        <button class="menu-button" data-unit="harrier">Statek Pow. (40🌲 100💰)</button>
+      </div>
+      <div id="action-info"></div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      // ====================================================================
+      // MULTIPLAYER NETWORKING & SEEDED RANDOM
+      // ====================================================================
+      let prng; 
+      function mulberry32(a) {
+          return function() {
+            var t = a += 0x6D2B79F5;
+            t = Math.imul(t ^ t >>> 15, t | 1);
+            t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+          }
+      }
+
+      // Dokładny adres docelowy backendu:
+      const socket = new WebSocket('wss://reactblog.pl/blodia-server/');
+      
+      let myPlayerId = null;
+      let networkPlayers = {}; 
+      let isMultiplayerInitialized = false;
+
+      socket.onopen = () => {
+          document.getElementById('loading-text').innerText = "Pobieranie stanu świata...";
+      };
+      
+      socket.onerror = (error) => {
+          console.error("WebSocket Error:", error);
+          document.getElementById('loading-text').innerText = "Błąd połączenia z serwerem. Odśwież stronę.";
+      };
+
+      socket.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+
+          switch(data.type) {
+              case 'INIT':
+                  myPlayerId = data.playerId;
+                  prng = mulberry32(data.mapSeed);
+                  gameState.resources = data.resources;
+                  initGame(data);
+                  break;
+
+              case 'PLAYER_JOINED':
+                  if (!networkPlayers[data.playerId]) {
+                      spawnNetworkPlayer(data.playerId, data.position);
+                      showActionInfo("Ktoś dołączył do gry!", 3000);
+                  }
+                  break;
+
+              case 'PLAYER_MOVED':
+                  if (networkPlayers[data.playerId]) {
+                      const targetPos = new THREE.Vector3(data.x, 0, data.z);
+                      targetPos.y = getInterpolatedHeight(data.x, data.z);
+                      networkPlayers[data.playerId].targetPosition.copy(targetPos);
+                      if (data.rotation !== undefined) {
+                          networkPlayers[data.playerId].targetRotation = data.rotation;
+                      }
+                  }
+                  break;
+
+              case 'PLAYER_LEFT':
+                  if (networkPlayers[data.playerId]) {
+                      scene.remove(networkPlayers[data.playerId].mesh);
+                      delete networkPlayers[data.playerId];
+                      showActionInfo("Gracz opuścił grę.", 3000);
+                  }
+                  break;
+
+              case 'RESOURCE_GATHERED':
+                  gameState.resources = data.resources; 
+                  removeResourceVisually(data.gridX, data.gridZ);
+                  updateUI();
+                  break;
+
+              case 'BUILDING_ADDED':
+                  gameState.resources = data.resources;
+                  spawnBuildingLocally(data.building.type, data.building.x, data.building.z);
+                  updateUI();
+                  break;
+
+              case 'UNIT_TRAINED':
+                  gameState.resources = data.resources;
+                  updateUI();
+                  break;
+          }
+      };
+
+      function sendNetworkAction(action) {
+          if(socket.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify(action));
+          }
+      }
+
+      // ====================================================================
+      // SIMPLEX NOISE 
+      // ====================================================================
+      const F2 = 0.5 * (Math.sqrt(3.0) - 1.0), G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+      const grad3 = new Float32Array([1,1,0,-1,1,0,1,-1,0,-1,-1,0,1,0,1,-1,0,1,1,0,-1,-1,0,-1,0,1,1,0,-1,1,0,1,-1,0,-1,-1]);
+      let perm, permMod12;
+
+      function initSimplex() {
+          const p = new Uint8Array(256);
+          for (let i = 0; i < 256; i++) p[i] = i;
+          for (let i = 255; i > 0; i--) {
+            const n = Math.floor((i + 1) * prng()); 
+            const q = p[i];
+            p[i] = p[n];
+            p[n] = q;
+          }
+          perm = new Uint8Array(512);
+          permMod12 = new Uint8Array(512);
+          for (let i = 0; i < 512; i++) {
+            perm[i] = p[i & 255];
+            permMod12[i] = perm[i] % 12;
+          }
+      }
+
+      function simplex2D(xin, yin) {
+        let n0, n1, n2;
+        const s = (xin + yin) * F2, i = Math.floor(xin + s), j = Math.floor(yin + s), t = (i + j) * G2;
+        const X0 = i - t, Y0 = j - t, x0 = xin - X0, y0 = yin - Y0;
+        let i1, j1;
+        if (x0 > y0) { i1 = 1; j1 = 0; } else { i1 = 0; j1 = 1; }
+        const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2, x2 = x0 - 1.0 + 2.0 * G2, y2 = y0 - 1.0 + 2.0 * G2;
+        const ii = i & 255, jj = j & 255;
+        const gi0 = permMod12[ii + perm[jj]] * 3, gi1 = permMod12[ii + i1 + perm[jj + j1]] * 3, gi2 = permMod12[ii + 1 + perm[jj + 1]] * 3;
+        let t0 = 0.5 - x0 * x0 - y0 * y0;
+        if (t0 < 0) n0 = 0.0; else { t0 *= t0; n0 = t0 * t0 * (grad3[gi0] * x0 + grad3[gi0 + 1] * y0); }
+        let t1 = 0.5 - x1 * x1 - y1 * y1;
+        if (t1 < 0) n1 = 0.0; else { t1 *= t1; n1 = t1 * t1 * (grad3[gi1] * x1 + grad3[gi1 + 1] * y1); }
+        let t2 = 0.5 - x2 * x2 - y2 * y2;
+        if (t2 < 0) n2 = 0.0; else { t2 *= t2; n2 = t2 * t2 * (grad3[gi2] * x2 + grad3[gi2 + 1] * y2); }
+        return 70.0 * (n0 + n1 + n2);
+      }
+
+      // ====================================================================
+      // KONFIGURACJA I STAŁE
+      // ====================================================================
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0xd2b48c);
+      scene.fog = new THREE.Fog(0xd2b48c, 60, 150);
+
+      const TILE_SIZE = 2;
+      const MAP_WIDTH = 50;
+      const MAP_HEIGHT = 50;
+      const TERRAIN_HEIGHT_SCALE = 8;
+
+      const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.getElementById("game-container").appendChild(renderer.domElement);
+
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+      const directionalLight = new THREE.DirectionalLight(0xffecd6, 1.2);
+      directionalLight.position.set(-40, 60, 30);
+      directionalLight.castShadow = true;
+      directionalLight.shadow.mapSize.width = 4096;
+      directionalLight.shadow.mapSize.height = 4096;
+      scene.add(directionalLight);
+
+      const UNIT_STATS = {
+        swordsman: { hp: 100, damage: 12, speed: 3.5, range: 1.5, cost: { wood: 20, stone: 0, spice: 10 }, color: 0x0044ff, isFlying: false },
+        shieldbearer: { hp: 150, damage: 8, speed: 3.0, range: 1.5, cost: { wood: 30, stone: 0, spice: 15 }, color: 0x4444ff, isFlying: false },
+        crossbowman: { hp: 70, damage: 10, speed: 3.8, range: 8.0, cost: { wood: 15, stone: 0, spice: 25 }, color: 0x00aaff, isFlying: false },
+        tank: { hp: 300, damage: 25, speed: 2.8, range: 6.0, cost: { wood: 0, stone: 50, spice: 80 }, isFlying: false },
+        harrier: { hp: 120, damage: 18, speed: 5.5, range: 7.0, cost: { wood: 40, stone: 0, spice: 100 }, isFlying: true }
+      };
+
+      const gameState = {
+        resources: { wood: 0, stone: 0, spice: 0 }, 
+        player: { health: 100, maxHealth: 100, damage: 10, attackSpeed: 1.0, lastAttackTime: 0 },
+        playerUnits: [], enemyUnits:[], buildings: [], selectedUnits:[], playerBase: null, enemyBase: null,
+      };
+
+      let hero;
+      let path =[];
+      const worldObjects = {};
+      const grid = Array(MAP_WIDTH).fill(null).map(() => Array(MAP_HEIGHT).fill(0));
+      const heightMap = Array(MAP_WIDTH).fill(null).map(() => Array(MAP_HEIGHT).fill(0));
+
+      const woodAmountEl = document.getElementById("wood-amount");
+      const stoneAmountEl = document.getElementById("stone-amount");
+      const spiceAmountEl = document.getElementById("spice-amount");
+      const healthBarFillEl = document.getElementById("health-bar-fill");
+      const buildMenuEl = document.getElementById("build-menu");
+      const trainMenuEl = document.getElementById("train-menu");
+      const factoryMenuEl = document.getElementById("factory-menu");
+      const actionInfoEl = document.getElementById("action-info");
+
+      const buildingCosts = {
+        townhall: { wood: 150, stone: 100, spice: 0 },
+        barracks: { wood: 100, stone: 50, spice: 0 },
+        factory: { wood: 120, stone: 150, spice: 0 },
+        spice_silo: { wood: 80, stone: 120, spice: 0 },
+      };
+      const buildingData = {
+        townhall: { name: "Ratusz", color: 0xaaaaaa, size: new THREE.Vector3(TILE_SIZE * 1.5, TILE_SIZE * 2.5, TILE_SIZE * 1.5) },
+        barracks: { name: "Koszary", color: 0x8b4513, size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 2, TILE_SIZE) },
+        factory: { name: "Fabryka", color: 0x606070, size: new THREE.Vector3(TILE_SIZE * 1.8, TILE_SIZE * 1.5, TILE_SIZE * 1.2) },
+        spice_silo: { name: "Silos", color: 0xffd700, size: new THREE.Vector3(TILE_SIZE, TILE_SIZE * 1.5, TILE_SIZE) },
+      };
+
+      function getHeight(x, z) { if (x < 0 || x >= MAP_WIDTH || z < 0 || z >= MAP_HEIGHT) return 0; return heightMap[Math.floor(x)][Math.floor(z)]; }
+      function getInterpolatedHeight(worldX, worldZ) {
+        const gridX = worldX / TILE_SIZE; const gridZ = worldZ / TILE_SIZE;
+        const x1 = Math.floor(gridX); const z1 = Math.floor(gridZ);
+        const x2 = x1 + 1; const z2 = z1 + 1;
+        if (x1 < 0 || x2 >= MAP_WIDTH || z1 < 0 || z2 >= MAP_HEIGHT) return 0;
+        const h11 = getHeight(x1, z1); const h12 = getHeight(x1, z2);
+        const h21 = getHeight(x2, z1); const h22 = getHeight(x2, z2);
+        const tx = gridX - x1; const tz = gridZ - z1;
+        const h_x1 = h11 * (1 - tx) + h21 * tx; const h_x2 = h12 * (1 - tx) + h22 * tx;
+        return h_x1 * (1 - tz) + h_x2 * tz;
+      }
+      function isAreaFlat(gridX, gridZ, size = 1) {
+        const heights =[];
+        for (let x = gridX; x < gridX + size; x++) for (let z = gridZ; z < gridZ + size; z++) heights.push(getHeight(x, z));
+        return Math.max(...heights) - Math.min(...heights) < TILE_SIZE * 0.5;
+      }
+      function gridToWorld(x, z) { return new THREE.Vector3(x * TILE_SIZE, getHeight(x, z), z * TILE_SIZE); }
+      function worldToGrid(position) { return { x: Math.round(position.x / TILE_SIZE), z: Math.round(position.z / TILE_SIZE) }; }
+      function showActionInfo(text, duration = 2000) { actionInfoEl.textContent = text; actionInfoEl.style.display = "block"; setTimeout(() => actionInfoEl.style.display = "none", duration); }
+
+      // ====================================================================
+      // GENEROWANIE ŚWIATA
+      // ====================================================================
+      function generateWorld(serverData) {
+        initSimplex(); 
+        const geometry = new THREE.PlaneGeometry(MAP_WIDTH * TILE_SIZE, MAP_HEIGHT * TILE_SIZE, MAP_WIDTH - 1, MAP_HEIGHT - 1);
+        geometry.rotateX(-Math.PI / 2);
+        const positions = geometry.attributes.position.array;
+
+        const noiseScale = 0.1;
+        for (let i = 0; i < positions.length; i += 3) {
+          const vertex = new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]);
+          const gridX = Math.round((vertex.x + (MAP_WIDTH * TILE_SIZE) / 2) / TILE_SIZE);
+          const gridZ = Math.round((vertex.z + (MAP_HEIGHT * TILE_SIZE) / 2) / TILE_SIZE);
+
+          if (gridX >= 0 && gridX < MAP_WIDTH && gridZ >= 0 && gridZ < MAP_HEIGHT) {
+            const nx = gridX * noiseScale, nz = gridZ * noiseScale;
+            const e = 1 * simplex2D(nx, nz) + 0.5 * simplex2D(2 * nx, 2 * nz) + 0.25 * simplex2D(4 * nx, 4 * nz);
+            const baseHeight = Math.max(0, e);
+            const height = Math.pow(baseHeight, 2.5) * TERRAIN_HEIGHT_SCALE;
+            positions[i + 1] = height;
+            heightMap[gridX][gridZ] = height;
+          }
+        }
+        geometry.attributes.position.needsUpdate = true;
+        geometry.computeVertexNormals();
+
+        const CLIFF_THRESHOLD = TILE_SIZE * 1.5;
+        for (let x = 0; x < MAP_WIDTH; x++) {
+          for (let z = 0; z < MAP_HEIGHT; z++) {
+            const h = getHeight(x, z);
+            if (Math.abs(h - getHeight(x + 1, z)) > CLIFF_THRESHOLD || Math.abs(h - getHeight(x - 1, z)) > CLIFF_THRESHOLD ||
+                Math.abs(h - getHeight(x, z + 1)) > CLIFF_THRESHOLD || Math.abs(h - getHeight(x, z - 1)) > CLIFF_THRESHOLD) {
+              grid[x][z] = 1;
+            }
+          }
+        }
+
+        const terrainMaterial = new THREE.ShaderMaterial({
+          uniforms: { sandColor: { value: new THREE.Color(0xc2b280) }, rockColor: { value: new THREE.Color(0x7f7053) }, cliffColor: { value: new THREE.Color(0x4a4130) }, heightScale: { value: TERRAIN_HEIGHT_SCALE * 2 } },
+          vertexShader: `varying vec3 vWorldPosition; varying vec3 vNormal; void main() { vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz; vNormal = normal; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+          fragmentShader: `varying vec3 vWorldPosition; varying vec3 vNormal; uniform vec3 sandColor; uniform vec3 rockColor; uniform vec3 cliffColor; uniform float heightScale; void main() { float heightFactor = smoothstep(2.0, heightScale, vWorldPosition.y); float slopeFactor = 1.0 - vNormal.y; slopeFactor = smoothstep(0.3, 0.7, slopeFactor); vec3 color = mix(sandColor, rockColor, heightFactor); color = mix(color, cliffColor, slopeFactor); gl_FragColor = vec4(color, 1.0); }`
+        });
+
+        const terrainMesh = new THREE.Mesh(geometry, terrainMaterial);
+        terrainMesh.receiveShadow = true;
+        scene.add(terrainMesh);
+
+        const resourceMaterials = {
+          stone: new THREE.MeshLambertMaterial({ color: 0x908070 }),
+          wood: new THREE.MeshLambertMaterial({ color: 0x556b2f }),
+          spice: new THREE.MeshLambertMaterial({ color: 0xe89f39, emissive: 0x774411 })
+        };
+
+        for (let i = 0; i < 80; i++) {
+          const x = Math.floor(prng() * MAP_WIDTH);
+          const z = Math.floor(prng() * MAP_HEIGHT);
+          
+          if (grid[x][z] === 0 && isAreaFlat(x, z)) {
+            let type, mat;
+            const r = prng();
+            if (r < 0.4) { type = "stone"; mat = resourceMaterials.stone; }
+            else if (r < 0.7) { type = "wood"; mat = resourceMaterials.wood; }
+            else { type = "spice"; mat = resourceMaterials.spice; }
+
+            if (!serverData.gatheredNodes.includes(`${x},${z}`)) {
+                createResource(gridToWorld(x, z), mat, type, x, z);
+            }
+            grid[x][z] = 1; 
+          }
+        }
+        
+        serverData.buildings.forEach(b => {
+             spawnBuildingLocally(b.type, b.x, b.z);
+        });
+      }
+
+      function createResource(pos, material, type, x, z) {
+        const mesh = new THREE.Mesh(new THREE.DodecahedronGeometry(TILE_SIZE * 0.8, 0), material);
+        mesh.position.copy(pos); mesh.position.y += 1; mesh.castShadow = true;
+        mesh.userData = { type: type, gridX: x, gridZ: z };
+        scene.add(mesh);
+        worldObjects[`${x},${z}`] = mesh;
+      }
+      
+      function removeResourceVisually(x, z) {
+          const key = `${x},${z}`;
+          if (worldObjects[key]) {
+              scene.remove(worldObjects[key]);
+              delete worldObjects[key];
+              grid[x][z] = 0;
+          }
+      }
+
+      function createHero(startData) {
+        hero = createCharacterMesh(0x2980b9);
+        hero.position.set(startData.x, 0, startData.z);
+        hero.position.y = getInterpolatedHeight(hero.position.x, hero.position.z);
+        hero.rotation.y = startData.rotation || 0;
+        scene.add(hero);
+        updateCameraPosition();
+      }
+
+      function createCharacterMesh(color) {
+        const group = new THREE.Group();
+        
+        // Torso
+        const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.4, 0.8, 4, 8), new THREE.MeshLambertMaterial({ color: color }));
+        torso.position.y = 1.3;
+        torso.castShadow = true;
+        group.add(torso);
+
+        // Head
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.35, 16, 16), new THREE.MeshLambertMaterial({ color: 0xf1c40f }));
+        head.position.y = 2.1;
+        head.castShadow = true;
+        group.add(head);
+
+        // Legs
+        const legGeom = new THREE.CapsuleGeometry(0.15, 0.5, 4, 8);
+        const legMat = new THREE.MeshLambertMaterial({ color: 0x333333 });
+        
+        const leftLeg = new THREE.Mesh(legGeom, legMat);
+        leftLeg.position.set(-0.25, 0.5, 0);
+        leftLeg.castShadow = true;
+        group.add(leftLeg);
+
+        const rightLeg = new THREE.Mesh(legGeom, legMat);
+        rightLeg.position.set(0.25, 0.5, 0);
+        rightLeg.castShadow = true;
+        group.add(rightLeg);
+
+        // Arms
+        const armGeom = new THREE.CapsuleGeometry(0.12, 0.5, 4, 8);
+        const armMat = new THREE.MeshLambertMaterial({ color: 0xf1c40f });
+        
+        const leftArm = new THREE.Mesh(armGeom, armMat);
+        leftArm.position.set(-0.55, 1.4, 0);
+        leftArm.castShadow = true;
+        group.add(leftArm);
+
+        const rightArm = new THREE.Mesh(armGeom, armMat);
+        rightArm.position.set(0.55, 1.4, 0);
+        rightArm.castShadow = true;
+        group.add(rightArm);
+
+        group.userData = {
+          limbs: { leftLeg, rightLeg, leftArm, rightArm, torso, head },
+          animTime: 0
+        };
+
+        return group;
+      }
+
+      function animateCharacter(character, isMoving, delta) {
+        const limbs = character.userData.limbs;
+        if (!limbs) return;
+
+        if (isMoving) {
+          character.userData.animTime += delta * 12;
+          const t = character.userData.animTime;
+          
+          limbs.leftLeg.position.z = Math.sin(t) * 0.4;
+          limbs.leftLeg.position.y = 0.5 + Math.max(0, Math.cos(t) * 0.1);
+          
+          limbs.rightLeg.position.z = Math.sin(t + Math.PI) * 0.4;
+          limbs.rightLeg.position.y = 0.5 + Math.max(0, Math.cos(t + Math.PI) * 0.1);
+          
+          limbs.leftArm.position.z = Math.sin(t + Math.PI) * 0.4;
+          limbs.leftArm.rotation.x = Math.sin(t + Math.PI) * 0.5;
+          
+          limbs.rightArm.position.z = Math.sin(t) * 0.4;
+          limbs.rightArm.rotation.x = Math.sin(t) * 0.5;
+          
+          limbs.torso.position.y = 1.3 + Math.sin(t * 2) * 0.05;
+          limbs.head.position.y = 2.1 + Math.sin(t * 2) * 0.05;
+        } else {
+          // Reset position
+          const lerpSpeed = 0.1;
+          limbs.leftLeg.position.z = THREE.MathUtils.lerp(limbs.leftLeg.position.z, 0, lerpSpeed);
+          limbs.leftLeg.position.y = THREE.MathUtils.lerp(limbs.leftLeg.position.y, 0.5, lerpSpeed);
+          limbs.rightLeg.position.z = THREE.MathUtils.lerp(limbs.rightLeg.position.z, 0, lerpSpeed);
+          limbs.rightLeg.position.y = THREE.MathUtils.lerp(limbs.rightLeg.position.y, 0.5, lerpSpeed);
+          limbs.leftArm.position.z = THREE.MathUtils.lerp(limbs.leftArm.position.z, 0, lerpSpeed);
+          limbs.leftArm.rotation.x = THREE.MathUtils.lerp(limbs.leftArm.rotation.x, 0, lerpSpeed);
+          limbs.rightArm.position.z = THREE.MathUtils.lerp(limbs.rightArm.position.z, 0, lerpSpeed);
+          limbs.rightArm.rotation.x = THREE.MathUtils.lerp(limbs.rightArm.rotation.x, 0, lerpSpeed);
+          limbs.torso.position.y = THREE.MathUtils.lerp(limbs.torso.position.y, 1.3, lerpSpeed);
+          limbs.head.position.y = THREE.MathUtils.lerp(limbs.head.position.y, 2.1, lerpSpeed);
+        }
+      }
+
+      function spawnNetworkPlayer(id, data) {
+          const group = createCharacterMesh(0xe74c3c);
+          group.position.set(data.x, 0, data.z);
+          group.position.y = getInterpolatedHeight(data.x, data.z);
+          group.rotation.y = data.rotation || 0;
+          scene.add(group);
+          
+          networkPlayers[id] = {
+              mesh: group,
+              targetPosition: group.position.clone(),
+              targetRotation: data.rotation || 0,
+              isMoving: false
+          };
+      }
+
+      function updateCameraPosition() {
+        const offset = new THREE.Vector3(20, 25, 20);
+        camera.position.copy(hero.position).add(offset);
+        camera.lookAt(hero.position);
+      }
+
+      // ====================================================================
+      // ŚCIEŻKOWANIE (A*)
+      // ====================================================================
+      function findPath(start, end) {
+        const openSet = [], closedSet =[], cameFrom = {}, gScore = {}, fScore = {};
+        function heuristic(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.z - b.z); }
+        const startKey = `${start.x},${start.z}`;
+        gScore[startKey] = 0; fScore[startKey] = heuristic(start, end);
+        openSet.push({ x: start.x, z: start.z });
+        while (openSet.length > 0) {
+          let lowestIndex = 0;
+          for (let i = 1; i < openSet.length; i++) if (fScore[`${openSet[i].x},${openSet[i].z}`] < fScore[`${openSet[lowestIndex].x},${openSet[lowestIndex].z}`]) lowestIndex = i;
+          const current = openSet[lowestIndex];
+          if (current.x === end.x && current.z === end.z) {
+            const totalPath = [current]; let temp = current;
+            while (cameFrom[`${temp.x},${temp.z}`]) { temp = cameFrom[`${temp.x},${temp.z}`]; totalPath.unshift(temp); }
+            return totalPath;
+          }
+          openSet.splice(lowestIndex, 1); closedSet.push(current);
+          const neighbors =[{ x: current.x + 1, z: current.z }, { x: current.x - 1, z: current.z }, { x: current.x, z: current.z + 1 }, { x: current.x, z: current.z - 1 }];
+          for (const neighbor of neighbors) {
+            if (neighbor.x < 0 || neighbor.x >= MAP_WIDTH || neighbor.z < 0 || neighbor.z >= MAP_HEIGHT || grid[neighbor.x][neighbor.z] === 1) continue;
+            if (closedSet.find((c) => c.x === neighbor.x && c.z === neighbor.z)) continue;
+            const tentativeGScore = gScore[`${current.x},${current.z}`] + 1;
+            const neighborKey = `${neighbor.x},${neighbor.z}`;
+            if (!openSet.find((o) => o.x === neighbor.x && o.z === neighbor.z)) openSet.push(neighbor);
+            else if (tentativeGScore >= gScore[neighborKey]) continue;
+            cameFrom[neighborKey] = current; gScore[neighborKey] = tentativeGScore; fScore[neighborKey] = gScore[neighborKey] + heuristic(neighbor, end);
+          }
+        }
+        return[];
+      }
+
+      // ====================================================================
+      // KONTROLA I INTERAKCJE
+      // ====================================================================
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      let currentAction = null;
+
+      function onMouseClick(event) {
+        if(event.target.tagName === 'BUTTON') return; 
+        
+        mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        buildMenuEl.style.display = "none"; trainMenuEl.style.display = "none"; factoryMenuEl.style.display = "none";
+        
+        if (intersects.length > 0) {
+          let clickedObject = intersects[0].object;
+          while (clickedObject.parent && clickedObject.parent.type !== "Scene") {
+            if (clickedObject.userData.type) break;
+            clickedObject = clickedObject.parent;
+          }
+          const data = clickedObject.userData;
+          
+          if (data.type === "building") {
+              if (data.building === "barracks") { updateTrainMenu(); trainMenuEl.style.display = "flex"; return; }
+              if (data.building === "factory") { updateFactoryMenu(); factoryMenuEl.style.display = "flex"; return; }
+          }
+
+          const currentGridPos = worldToGrid(hero.position);
+          let targetGridPos;
+          
+          if (data.type === "wood" || data.type === "stone" || data.type === "spice") {
+            targetGridPos = { x: data.gridX, z: data.gridZ };
+            currentAction = { type: "gather", target: clickedObject, targetGridPos };
+          } else {
+            targetGridPos = worldToGrid(intersects[0].point);
+            currentAction = { type: "move", targetGridPos };
+          }
+          
+          if (currentAction) {
+            path = findPath(currentGridPos, targetGridPos);
+            if (path.length === 0 && currentAction.type === "gather") {
+              const neighbors =[{ x: targetGridPos.x + 1, z: targetGridPos.z }, { x: targetGridPos.x - 1, z: targetGridPos.z }, { x: targetGridPos.x, z: targetGridPos.z + 1 }, { x: targetGridPos.x, z: targetGridPos.z - 1 }];
+              for (const n of neighbors) {
+                if (n.x >= 0 && n.x < MAP_WIDTH && n.z >= 0 && n.z < MAP_HEIGHT && grid[n.x][n.z] === 0) {
+                  path = findPath(currentGridPos, n);
+                  if (path.length > 0) break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      function onKeyPress(event) {
+        if (event.key.toLowerCase() === "b") {
+          const currentGridPos = worldToGrid(hero.position);
+          if (grid[currentGridPos.x][currentGridPos.z] === 0) {
+            if (isAreaFlat(currentGridPos.x, currentGridPos.z)) {
+              updateBuildMenu();
+              buildMenuEl.style.display = "flex";
+              buildMenuEl.dataset.gridX = currentGridPos.x;
+              buildMenuEl.dataset.gridZ = currentGridPos.z;
+            } else showActionInfo("Teren zbyt stromy!");
+          } else showActionInfo("Nie można tu budować.");
+        }
+      }
+
+      function handleAction() {
+        if (!currentAction || path.length > 0) return;
+        const { type, target, targetGridPos } = currentAction;
+        if (type === "gather" && worldObjects[`${targetGridPos.x},${targetGridPos.z}`]) {
+          const resourceType = target.userData.type;
+          let amounts = { wood: 0, stone: 0, spice: 0 };
+          if (resourceType === "wood") amounts.wood = 20;
+          if (resourceType === "stone") amounts.stone = 15;
+          if (resourceType === "spice") amounts.spice = 10;
+          
+          sendNetworkAction({
+              type: 'GATHER',
+              gridX: targetGridPos.x,
+              gridZ: targetGridPos.z,
+              amounts: amounts
+          });
+        }
+        currentAction = null;
+      }
+
+      // ====================================================================
+      // BUDOWANIE I REKRUTACJA
+      // ====================================================================
+      function updateMenu(menuEl, costSource) {
+        menuEl.querySelectorAll(".menu-button").forEach((button) => {
+          const cost = costSource[button.dataset.building] || costSource[button.dataset.unit];
+          const canAfford = gameState.resources.wood >= cost.wood && gameState.resources.stone >= cost.stone && gameState.resources.spice >= cost.spice;
+          button.classList.toggle("disabled", !canAfford);
+        });
+      }
+      const updateBuildMenu = () => updateMenu(buildMenuEl, buildingCosts);
+      const updateTrainMenu = () => updateMenu(trainMenuEl, UNIT_STATS);
+      const updateFactoryMenu = () => updateMenu(factoryMenuEl, UNIT_STATS);
+
+      function build(type) {
+        const gridX = parseInt(buildMenuEl.dataset.gridX), gridZ = parseInt(buildMenuEl.dataset.gridZ);
+        if (isNaN(gridX) || isNaN(gridZ)) return;
+        
+        sendNetworkAction({
+            type: 'BUILD',
+            buildingType: type,
+            gridX: gridX,
+            gridZ: gridZ,
+            cost: buildingCosts[type]
+        });
+        buildMenuEl.style.display = "none";
+      }
+
+      function spawnBuildingLocally(type, gridX, gridZ) {
+          const data = buildingData[type];
+          const buildingMesh = new THREE.Mesh(new THREE.BoxGeometry(data.size.x, data.size.y, data.size.z), new THREE.MeshLambertMaterial({ color: data.color }));
+          const pos = gridToWorld(gridX, gridZ);
+          pos.y += data.size.y / 2;
+          buildingMesh.position.copy(pos); buildingMesh.castShadow = true;
+          buildingMesh.userData = { type: "building", building: type, gridX, gridZ };
+          scene.add(buildingMesh);
+          grid[gridX][gridZ] = 1;
+          gameState.buildings.push(buildingMesh);
+      }
+
+      function updateUI() {
+        woodAmountEl.textContent = gameState.resources.wood;
+        stoneAmountEl.textContent = gameState.resources.stone;
+        spiceAmountEl.textContent = gameState.resources.spice;
+      }
+
+      // ====================================================================
+      // MINIMAPA
+      // ====================================================================
+      const minimapCanvas = document.getElementById("minimap"), minimapCtx = minimapCanvas.getContext("2d");
+      const MINIMAP_SCALE = 4;
+      minimapCanvas.width = MAP_WIDTH * MINIMAP_SCALE; minimapCanvas.height = MAP_HEIGHT * MINIMAP_SCALE;
+
+      function drawMinimap() {
+        minimapCtx.fillStyle = "#c2b280"; minimapCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+        for (let z = 0; z < MAP_HEIGHT; z++) {
+          for (let x = 0; x < MAP_WIDTH; x++) {
+            if (grid[x][z] === 1 && !worldObjects[`${x},${z}`] && !gameState.buildings.find(b => b.userData.gridX === x && b.userData.gridZ === z)) {
+              minimapCtx.fillStyle = "#4a4130"; minimapCtx.fillRect(x * MINIMAP_SCALE, z * MINIMAP_SCALE, MINIMAP_SCALE, MINIMAP_SCALE);
+            }
+          }
+        }
+        minimapCtx.fillStyle = "#ffffff";
+        gameState.buildings.forEach((b) => minimapCtx.fillRect(b.userData.gridX * MINIMAP_SCALE, b.userData.gridZ * MINIMAP_SCALE, MINIMAP_SCALE, MINIMAP_SCALE));
+        
+        minimapCtx.fillStyle = "green";
+        Object.values(networkPlayers).forEach(p => {
+             const pos = worldToGrid(p.mesh.position);
+             minimapCtx.beginPath(); minimapCtx.arc(pos.x * MINIMAP_SCALE + 2, pos.z * MINIMAP_SCALE + 2, MINIMAP_SCALE, 0, 7); minimapCtx.fill();
+        });
+
+        minimapCtx.fillStyle = "yellow";
+        const playerPos = worldToGrid(hero.position);
+        minimapCtx.beginPath(); minimapCtx.arc(playerPos.x * MINIMAP_SCALE + 2, playerPos.z * MINIMAP_SCALE + 2, MINIMAP_SCALE, 0, 7); minimapCtx.fill();
+      }
+
+      // ====================================================================
+      // PĘTLA GRY
+      // ====================================================================
+      const clock = new THREE.Clock();
+      let lastNetworkPos = new THREE.Vector3();
+      let networkUpdateTimer = 0;
+      const NETWORK_TICK_RATE = 0.1; // 100ms
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        let isHeroMoving = false;
+
+        if (path.length > 0) {
+          isHeroMoving = true;
+          const targetNode = path[0];
+          const targetPos = gridToWorld(targetNode.x, targetNode.z);
+          const direction = targetPos.clone().sub(hero.position);
+          direction.y = 0;
+          
+          if (direction.length() > 0.1) {
+              const moveDirection = direction.clone().normalize();
+              const moveStep = 8 * delta; // Prędkość zwiększona do 8
+              
+              if (direction.length() < moveStep) {
+                  hero.position.copy(targetPos);
+              } else {
+                  hero.position.add(moveDirection.multiplyScalar(moveStep));
+              }
+              
+              // Obrót w stronę ruchu
+              const targetRotation = Math.atan2(moveDirection.x, moveDirection.z);
+              hero.rotation.y = THREE.MathUtils.lerpAngle(hero.rotation.y, targetRotation, 0.2);
+          }
+
+          hero.position.y = getInterpolatedHeight(hero.position.x, hero.position.z);
+
+          if (hero.position.distanceTo(targetPos) < 0.1) {
+            path.shift();
+            if (path.length === 0) handleAction();
+          }
+          
+          updateCameraPosition();
+        }
+        
+        // Animacja bohatera
+        animateCharacter(hero, isHeroMoving, delta);
+
+        // Wysyłanie pozycji do serwera (bardziej płynne)
+        networkUpdateTimer += delta;
+        if (networkUpdateTimer >= NETWORK_TICK_RATE) {
+            if (hero.position.distanceTo(lastNetworkPos) > 0.05) {
+                lastNetworkPos.copy(hero.position);
+                sendNetworkAction({ 
+                    type: 'MOVE', 
+                    x: hero.position.x, 
+                    z: hero.position.z,
+                    rotation: hero.rotation.y 
+                });
+            }
+            networkUpdateTimer = 0;
+        }
+
+        // Aktualizacja i animacja graczy sieciowych
+        Object.values(networkPlayers).forEach(p => {
+             const prevPos = p.mesh.position.clone();
+             p.mesh.position.lerp(p.targetPosition, 0.15); // Szybszy lerp
+             p.mesh.position.y = getInterpolatedHeight(p.mesh.position.x, p.mesh.position.z);
+             
+             if (p.targetRotation !== undefined) {
+                 p.mesh.rotation.y = THREE.MathUtils.lerpAngle(p.mesh.rotation.y, p.targetRotation, 0.15);
+             }
+
+             // Czy się rusza?
+             const distMoved = p.mesh.position.distanceTo(prevPos);
+             p.isMoving = distMoved > 0.01;
+             animateCharacter(p.mesh, p.isMoving, delta);
+        });
+
+        healthBarFillEl.style.width = `${(gameState.player.health / gameState.player.maxHealth) * 100}%`;
+        
+        drawMinimap();
+        renderer.render(scene, camera);
+      }
+
+      // ====================================================================
+      // INICJALIZACJA
+      // ====================================================================
+      function initGame(serverData) {
+        document.getElementById('loading-screen').style.display = 'none';
+        
+        generateWorld(serverData);
+        createHero(serverData.players[myPlayerId]);
+        
+        for(let pId in serverData.players) {
+            if (pId !== myPlayerId) spawnNetworkPlayer(pId, serverData.players[pId]);
+        }
+
+        updateUI(); 
+
+        window.addEventListener("resize", () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }, false);
+        renderer.domElement.addEventListener("click", onMouseClick, false);
+        window.addEventListener("keypress", onKeyPress, false);
+        document.querySelectorAll("#build-menu .menu-button").forEach((b) => b.addEventListener("click", (e) => { if (!b.classList.contains("disabled")) build(b.dataset.building); e.stopPropagation(); }));
+
+        animate();
+        showActionInfo("Witaj w Wieloosobowej Pustyni! Surowce są współdzielone.", 4000);
+      }
+    </script>
+</body>
+</html>
